@@ -1,0 +1,16 @@
+# Неконфиденциальные настройки. Приложение собирает из них строки
+# подключения (app/config.py), поэтому образ не зависит от окружения.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+  namespace: fastapi-app
+data:
+  # Для CloudNativePG замените на "postgres-cluster-rw" (см. k8s/cnpg/).
+  DATABASE_HOST: "postgres"
+  DATABASE_NAME: "appdb"
+  REDIS_HOST: "redis"
+  RABBITMQ_HOST: "rabbitmq"
+  # Схему БД создаёт Job db-migrate (alembic), а не реплики API.
+  AUTO_CREATE_TABLES: "false"
+  CERTIFICATES_DIR: "/app/certificates"

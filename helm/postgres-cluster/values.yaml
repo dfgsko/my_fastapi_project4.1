@@ -1,0 +1,23 @@
+clusterName: postgres-cluster
+instances: 3
+imageName: ghcr.io/cloudnative-pg/postgresql:16.4
+database: appdb
+owner: appuser
+# Секрет типа kubernetes.io/basic-auth (username/password).
+# Если existingSecret пуст — создаётся из credentials ниже (только для dev!).
+existingSecret: ""
+credentials:
+  username: appuser
+  password: securePassword123
+storage:
+  size: 1Gi
+  storageClass: ""
+parameters:
+  max_connections: "200"
+  shared_buffers: "128MB"
+  effective_cache_size: "512MB"
+resources:
+  requests: {memory: 256Mi, cpu: 100m}
+  limits: {memory: 512Mi, cpu: 500m}
+podMonitor:
+  enabled: false     # нужен Prometheus Operator

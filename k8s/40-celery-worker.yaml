@@ -1,0 +1,60 @@
+# Celery-воркер: генерирует PDF-сертификаты. replicas здесь — стартовое
+# значение; после применения k8s/keda/ количеством реплик управляет KEDA.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: celery-worker
+  namespace: fastapi-app
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: celery-worker
+  template:
+    metadata:
+      labels:
+        app: celery-worker
+    spec:
+      terminationGracePeriodSeconds: 60   # warm shutdown: доработать текущую задачу
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+      containers:
+        - name: worker
+          image: fastapi-worker:latest
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef: {name: app-config}
+            - secretRef: {name: app-secrets}
+            # Воркер кладёт готовые сертификаты в S3 (S3_UPLOAD_CERTIFICATES).
+            - configMapRef: {name: s3-config}
+            - secretRef: {name: app-s3-secrets}
+          env:
+            # Только для демонстрации KEDA: задача «работает» 2 с, и очередь
+            # успевает расти. В production эту переменную убрать.
+            - name: CERTIFICATE_DELAY_SECONDS
+              value: "2"
+          volumeMounts:
+            - name: certificates
+              mountPath: /app/certificates
+          # HTTP-эндпоинта у воркера нет → exec-проба. Пингуем именно этот
+          # воркер (-d), а не всех сразу; timeoutSeconds обязателен: по
+          # умолчанию у exec-пробы всего 1 секунда.
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - celery -A app.celery_app:celery_app inspect ping -d celery@$HOSTNAME --timeout 10
+            initialDelaySeconds: 30
+            periodSeconds: 60
+            timeoutSeconds: 20
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+          resources:
+            requests: {memory: 256Mi, cpu: 200m}
+            limits: {memory: 512Mi, cpu: 1000m}
+      volumes:
+        - name: certificates
+          emptyDir: {}

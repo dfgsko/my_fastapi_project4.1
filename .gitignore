@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+.env
+app.db
+certificates/
+test_certificates/
+# Скачанные зависимости Helm (кроме локальных subcharts)
+helm/*/charts/*.tgz
+helm/*/Chart.lock

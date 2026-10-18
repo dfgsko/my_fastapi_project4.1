@@ -1,0 +1,32 @@
+# Значения по умолчанию subchart. Ключи доступа берутся из global.s3.* umbrella-чарта.
+image: chrislusf/seaweedfs:4.48
+clusterName: seaweedfs          # Service S3 → <clusterName>-s3:8333
+bucket:
+  name: fastapi-files
+  quota: 1Gi
+  reclaimPolicy: Retain
+lifecycle:
+  enabled: true
+  expireDays: 30                # uploads/ старше N дней удаляются
+master:
+  replicas: 1
+  resources:
+    requests: {cpu: 100m, memory: 128Mi}
+    limits: {cpu: 500m, memory: 512Mi}
+volume:
+  replicas: 1
+  storage: 10Gi
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {cpu: 500m, memory: 512Mi}
+filer:
+  replicas: 1
+  storage: 5Gi
+  resources:
+    requests: {cpu: 100m, memory: 128Mi}
+    limits: {cpu: 500m, memory: 512Mi}
+s3:
+  replicas: 1
+  resources:
+    requests: {cpu: 50m, memory: 128Mi}
+    limits: {cpu: 500m, memory: 512Mi}

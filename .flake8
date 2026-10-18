@@ -1,0 +1,7 @@
+[flake8]
+max-line-length = 100
+exclude = .git,__pycache__,.venv
+# conftest.py сначала выставляет переменные окружения, и только потом
+# импортирует приложение — поэтому импорты не в начале файла намеренно.
+per-file-ignores =
+    app/tests/conftest.py:E402

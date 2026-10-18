@@ -1,0 +1,91 @@
+# ---- Глобальные значения: доступны всем subchart как .Values.global ----
+global:
+  environment: dev
+  image:
+    registry: ""                 # "" — локальные образы Minikube; иначе, напр., ghcr.io/myuser
+    pullPolicy: IfNotPresent
+  database:
+    host: ""                     # "" → <release>-postgres; для CNPG: postgres-cluster-rw
+    name: appdb
+    user: appuser
+    password: securePassword123  # учебное значение! В prod: existingSecret / Sealed Secrets
+  redis:
+    host: ""                     # "" → <release>-redis
+  rabbitmq:
+    host: ""                     # "" → <release>-rabbitmq
+    user: guest
+    password: guest
+  # S3 (SeaweedFS). Эти же ключи чарт кладёт и в Secret приложения, и в
+  # identities S3-шлюза (charts/seaweedfs) — разойтись они не могут.
+  s3:
+    endpoint: ""                 # "" → http://seaweedfs-s3:8333 (Service оператора)
+    bucket: fastapi-files
+    region: us-east-1
+    accessKey: app-admin-key           # учебные значения! В prod: existingSecret
+    secretKey: app-admin-secret-change-me
+    readAccessKey: app-reader-key
+    readSecretKey: app-reader-secret-change-me
+  # Готовый Secret вместо создаваемого чартом. Должен содержать ключи
+  # DATABASE_USER, DATABASE_PASSWORD, RABBITMQ_DEFAULT_USER,
+  # RABBITMQ_DEFAULT_PASS, RABBITMQ_URL (amqp://user:pass@host:5672//) и,
+  # для S3, S3_ACCESS_KEY, S3_SECRET_KEY, S3_READ_ACCESS_KEY, S3_READ_SECRET_KEY.
+  existingSecret: ""
+
+# ---- API ----
+fastapi-api:
+  enabled: true
+  replicaCount: 2
+  image:
+    repository: fastapi-app
+    tag: latest
+  resources:
+    requests: {memory: 128Mi, cpu: 100m}
+    limits: {memory: 256Mi, cpu: 500m}
+  ingress:
+    enabled: false
+    className: nginx
+    host: fastapi.local
+  migrations:
+    enabled: true                # Helm-hook Job: alembic upgrade head
+
+# ---- Celery-воркеры ----
+fastapi-worker:
+  enabled: true
+  replicaCount: 2                # игнорируется, если keda.enabled
+  image:
+    repository: fastapi-worker
+    tag: latest
+  certificateDelaySeconds: 0     # >0 — искусственная задержка для демо KEDA
+  resources:
+    requests: {memory: 256Mi, cpu: 200m}
+    limits: {memory: 512Mi, cpu: 1000m}
+  keda:
+    enabled: false               # нужны CRD KEDA (helm install keda kedacore/keda)
+    pollingInterval: 15
+    cooldownPeriod: 60
+    minReplicaCount: 1
+    maxReplicaCount: 20
+    queueName: celery
+    queueLength: 10
+
+# ---- Инфраструктура (Redis, RabbitMQ, PostgreSQL для dev) ----
+infrastructure:
+  enabled: true
+  postgresql:
+    enabled: true                # в prod: false + CloudNativePG (helm/postgres-cluster)
+  redis:
+    enabled: true
+  rabbitmq:
+    enabled: true
+
+# ---- S3-хранилище SeaweedFS (лаб. № 4) ----
+# Нужен установленный seaweedfs-operator (CRD Seaweed/Bucket). Без него:
+#   --set seaweedfs.enabled=false
+seaweedfs:
+  enabled: true
+
+# ---- Подключение к мониторингу (лаб. № 4) ----
+# ServiceMonitor + Flower. Нужны CRD kube-prometheus-stack; без них:
+#   --set observability.enabled=false
+observability:
+  enabled: true

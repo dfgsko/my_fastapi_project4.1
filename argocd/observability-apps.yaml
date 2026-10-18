@@ -1,0 +1,131 @@
+# GitOps для инфраструктуры наблюдаемости и S3 (лаб. № 4): каждый компонент —
+# отдельный Application. Чарты берутся из репозиториев Helm, а values — из
+# ЭТОГО Git-репозитория (multi-source: ссылка `ref: values`, Argo CD ≥ 2.6).
+#
+#   kubectl apply -f argocd/observability-apps.yaml
+#
+# Порядок задаётся sync waves: operator'ы и CRD → стек → дашборды.
+# kube-prometheus-stack содержит огромные CRD, поэтому ServerSideApply=true
+# (иначе «annotation too long»).
+#
+# Подставьте свой репозиторий: scripts/configure.sh <логин> <репозиторий>
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: seaweedfs-operator
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  project: default
+  source:
+    repoURL: https://seaweedfs.github.io/seaweedfs-operator/
+    chart: seaweedfs-operator
+    targetRevision: "0.1.*"
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: seaweedfs-system
+  syncPolicy:
+    automated: {prune: true, selfHeal: true}
+    syncOptions: [CreateNamespace=true, ServerSideApply=true]
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: monitoring-base
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/YOUR_GITHUB_USER/YOUR_REPO.git
+    targetRevision: main
+    path: monitoring              # kustomize: namespace, secret, datasource, дашборды
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated: {prune: true, selfHeal: true}
+    syncOptions: [CreateNamespace=true]
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kube-prometheus-stack
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  project: default
+  sources:
+    - repoURL: https://prometheus-community.github.io/helm-charts
+      chart: kube-prometheus-stack
+      targetRevision: "^92.0.0"
+      helm:
+        releaseName: monitoring          # от имени релиза зависят имена сервисов
+        valueFiles:
+          - $values/monitoring/prometheus-values.yaml
+    - repoURL: https://github.com/YOUR_GITHUB_USER/YOUR_REPO.git
+      targetRevision: main
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated: {prune: true, selfHeal: true}
+    syncOptions: [CreateNamespace=true, ServerSideApply=true]
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: loki
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  project: default
+  sources:
+    - repoURL: https://grafana.github.io/helm-charts
+      chart: loki
+      targetRevision: "^7.0.0"
+      helm:
+        releaseName: loki
+        valueFiles:
+          - $values/monitoring/loki-values.yaml
+    - repoURL: https://github.com/YOUR_GITHUB_USER/YOUR_REPO.git
+      targetRevision: main
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated: {prune: true, selfHeal: true}
+    syncOptions: [CreateNamespace=true, ServerSideApply=true]
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: alloy
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "3"
+spec:
+  project: default
+  sources:
+    - repoURL: https://grafana.github.io/helm-charts
+      chart: alloy
+      targetRevision: "^1.0.0"
+      helm:
+        releaseName: alloy
+        valueFiles:
+          - $values/monitoring/alloy-values.yaml
+    - repoURL: https://github.com/YOUR_GITHUB_USER/YOUR_REPO.git
+      targetRevision: main
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated: {prune: true, selfHeal: true}
+    syncOptions: [CreateNamespace=true, ServerSideApply=true]

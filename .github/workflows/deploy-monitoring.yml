@@ -1,0 +1,38 @@
+name: Deploy monitoring stack (manual)
+
+# Ручной запуск (Actions → Run workflow). Основной путь деплоя в проекте —
+# GitOps через Argo CD (argocd/observability-apps.yaml), там kubeconfig в CI
+# не нужен. Этот workflow — вариант из методички для случая, когда кластер
+# доступен из GitHub Actions (облачный кластер; Minikube на ноутбуке — нет).
+# Требуется секрет репозитория KUBE_CONFIG (base64 от kubeconfig).
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+      - name: kubeconfig
+        run: |
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBE_CONFIG }}" | base64 -d > ~/.kube/config
+      - name: Repos
+        run: |
+          helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+          helm repo add grafana https://grafana.github.io/helm-charts
+          helm repo update
+      - name: Namespace, Secret Grafana, datasource, дашборды
+        run: kubectl apply -k monitoring/
+      - name: Deploy monitoring stack
+        run: |
+          helm upgrade --install monitoring prometheus-community/kube-prometheus-stack \
+            --namespace monitoring --create-namespace \
+            -f monitoring/prometheus-values.yaml
+          helm upgrade --install loki grafana/loki \
+            --namespace monitoring \
+            -f monitoring/loki-values.yaml
+          helm upgrade --install alloy grafana/alloy \
+            --namespace monitoring \
+            -f monitoring/alloy-values.yaml

@@ -1,0 +1,23 @@
+# Значения окружения «dev». Argo CD подключает этот файл поверх
+# helm/fastapi-platform/values.yaml. Теги образов в этом файле
+# обновляет Argo CD Image Updater (Git write-back) — вручную строки
+# image.tag обычно не правят.
+# Пароли в Git не хранятся: для реального стенда задайте
+# global.existingSecret (Sealed Secrets / External Secrets).
+global:
+  environment: dev
+fastapi-api:
+  replicaCount: 1
+  image:
+    repository: ghcr.io/YOUR_GITHUB_USER/fastapi-app
+    tag: "v1.2.0"
+  ingress:
+    enabled: true
+    host: fastapi-dev.local
+fastapi-worker:
+  image:
+    repository: ghcr.io/YOUR_GITHUB_USER/fastapi-worker
+    tag: "v1.2.0"
+  certificateDelaySeconds: 2
+  keda:
+    enabled: false

@@ -1,0 +1,160 @@
+# Контрольная точка перед Kubernetes (шаг 2 лабораторной): весь стек
+# в Docker Compose — API, Celery-воркер, PostgreSQL, Redis, RabbitMQ.
+#
+#   docker compose up --build
+#   API:       http://127.0.0.1:8000/docs
+#   RabbitMQ:  http://127.0.0.1:15672  (guest / guest)
+#   Flower:    docker compose --profile monitoring up  → http://127.0.0.1:5555
+#   Prometheus: тот же профиль → http://127.0.0.1:9090 (цели: api, flower)
+#   SeaweedFS S3: http://127.0.0.1:8333 (ключи — docker/seaweedfs-s3.json)
+#   Метрики API: http://127.0.0.1:8000/metrics
+
+x-app-env: &app-env
+  DATABASE_URL: postgresql+asyncpg://appuser:apppass@db:5432/appdb
+  REDIS_URL: redis://redis:6379/0
+  CELERY_BROKER_URL: amqp://guest:guest@rabbitmq:5672//
+  # S3 (SeaweedFS) — лаб. № 4. Ключи совпадают с docker/seaweedfs-s3.json.
+  S3_ENDPOINT: http://seaweedfs:8333
+  S3_BUCKET: fastapi-files
+  S3_ACCESS_KEY: app-admin-key
+  S3_SECRET_KEY: app-admin-secret-change-me
+  S3_READ_ACCESS_KEY: app-reader-key
+  S3_READ_SECRET_KEY: app-reader-secret-change-me
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: appuser
+      POSTGRES_PASSWORD: apppass
+      POSTGRES_DB: appdb
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U appuser -d appdb"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    ports:
+      - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+
+  seaweedfs:
+    image: chrislusf/seaweedfs:4.48
+    # master + volume + filer + S3-шлюз в одном процессе (для разработки).
+    command: server -dir=/data -s3 -s3.config=/etc/seaweedfs/s3.json -master.volumeSizeLimitMB=1024
+    ports:
+      - "8333:8333"
+    volumes:
+      - seaweedfs-data:/data
+      - ./docker/seaweedfs-s3.json:/etc/seaweedfs/s3.json:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:9333/cluster/status || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # Одноразовое создание бакета (в Kubernetes это делает CRD Bucket).
+  s3-init:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.api
+    command: ["python", "-m", "app.s3_init"]
+    environment:
+      <<: *app-env
+    depends_on:
+      seaweedfs:
+        condition: service_healthy
+
+  migrate:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.api
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      <<: *app-env
+    depends_on:
+      db:
+        condition: service_healthy
+
+  api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.api
+    ports:
+      - "8000:8000"
+    environment:
+      <<: *app-env
+      AUTO_CREATE_TABLES: "false"   # схему создаёт сервис migrate
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      s3-init:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:8000/ready')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  worker:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.worker
+    environment:
+      <<: *app-env
+      S3_UPLOAD_CERTIFICATES: "true"   # готовые сертификаты — в бакет
+    volumes:
+      - certificates:/app/certificates
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  flower:
+    image: mher/flower:2.0
+    profiles: ["monitoring"]
+    command: celery --broker=amqp://guest:guest@rabbitmq:5672// flower --port=5555
+    ports:
+      - "5555:5555"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    profiles: ["monitoring"]
+    command: ["--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.retention.time=2d"]
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./docker/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    depends_on:
+      - api
+
+volumes:
+  pgdata:
+  certificates:
+  seaweedfs-data:

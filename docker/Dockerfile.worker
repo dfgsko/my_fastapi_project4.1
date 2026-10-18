@@ -1,0 +1,20 @@
+# syntax=docker/dockerfile:1
+# Образ Celery-воркера: та же база, что и у API, другая команда запуска.
+FROM python:3.11-slim AS builder
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir --user -r requirements.txt
+
+FROM python:3.11-slim
+RUN groupadd --gid 1000 appuser \
+ && useradd --uid 1000 --gid 1000 --create-home appuser
+WORKDIR /app
+COPY --from=builder /root/.local /home/appuser/.local
+COPY --chown=appuser:appuser app/ ./app/
+# Сюда воркер кладёт PDF-сертификаты (в k8s сюда монтируется volume).
+RUN mkdir -p /app/certificates && chown appuser:appuser /app/certificates
+USER 1000:1000
+ENV PATH=/home/appuser/.local/bin:$PATH \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
+CMD ["celery", "-A", "app.celery_app:celery_app", "worker", "--loglevel=info"]

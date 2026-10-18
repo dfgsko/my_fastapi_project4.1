@@ -1,0 +1,25 @@
+# Всё, что не входит в Helm-релизы стека, но нужно Grafana:
+# namespace, admin-Secret, источник данных Loki и дашборды (из JSON-файлов).
+#
+#   kubectl apply -k monitoring/
+#
+# Дашборды превращаются в ConfigMap с меткой grafana_dashboard=1 — sidecar
+# Grafana подхватывает их автоматически (без ручного импорта через UI).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: monitoring
+resources:
+  - 00-namespace.yaml
+  - grafana-admin-secret.yaml
+  - grafana-datasources.yaml
+configMapGenerator:
+  - name: dashboard-fastapi
+    files:
+      - fastapi-dashboard.json=grafana-dashboards/fastapi-dashboard.json
+  - name: dashboard-celery
+    files:
+      - celery-dashboard.json=grafana-dashboards/celery-dashboard.json
+generatorOptions:
+  disableNameSuffixHash: true     # стабильные имена: обновление ConfigMap без перезапуска
+  labels:
+    grafana_dashboard: "1"

@@ -1,0 +1,35 @@
+apiVersion: v2
+name: fastapi-platform
+description: Umbrella-чарт всего стека — FastAPI, Celery-воркеры, Redis, RabbitMQ, PostgreSQL, SeaweedFS (S3) и подключение к мониторингу
+type: application
+version: 1.1.0
+appVersion: "1.2.0"
+# PostgreSQL в production НЕ является subchart: это кастомный ресурс
+# оператора CloudNativePG (отдельный чарт helm/postgres-cluster, оператор
+# ставится заранее). Для dev/Minikube простой StatefulSet включён в
+# subchart infrastructure (postgresql.enabled).
+dependencies:
+  - name: fastapi-api
+    version: "0.1.0"
+    repository: "file://charts/fastapi-api"
+    condition: fastapi-api.enabled
+  - name: fastapi-worker
+    version: "0.1.0"
+    repository: "file://charts/fastapi-worker"
+    condition: fastapi-worker.enabled
+  - name: infrastructure
+    version: "0.1.0"
+    repository: "file://charts/infrastructure"
+    condition: infrastructure.enabled
+  # --- лаб. № 4 ---------------------------------------------------------
+  # SeaweedFS: CR Seaweed/Bucket. Нужен оператор (helm install seaweedfs-operator ...).
+  - name: seaweedfs
+    version: "0.1.0"
+    repository: "file://charts/seaweedfs"
+    condition: seaweedfs.enabled
+  # ServiceMonitor для API и Flower. Нужны CRD kube-prometheus-stack.
+  # Сам стек (Prometheus, Grafana, Loki, Alloy) — отдельные релизы, см. monitoring/.
+  - name: observability
+    version: "0.1.0"
+    repository: "file://charts/observability"
+    condition: observability.enabled

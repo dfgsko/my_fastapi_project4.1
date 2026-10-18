@@ -1,0 +1,6 @@
+apiVersion: v2
+name: seaweedfs
+description: S3-хранилище SeaweedFS — ресурсы Seaweed, Bucket, BucketLifecyclePolicy и S3-ключи (нужен установленный seaweedfs-operator)
+type: application
+version: 0.1.0
+appVersion: "4.48"

@@ -1,0 +1,66 @@
+# Кластер SeaweedFS для Minikube: 1 master + 1 volume-сервер + 1 filer и
+# отдельный S3-шлюз. Применять ПОСЛЕ установки оператора и Secret с ключами:
+#
+#   helm repo add seaweedfs-operator https://seaweedfs.github.io/seaweedfs-operator/
+#   helm install seaweedfs-operator seaweedfs-operator/seaweedfs-operator \
+#     -n seaweedfs-system --create-namespace
+#   kubectl apply -f k8s/seaweedfs/s3-credentials.yaml
+#   kubectl apply -f k8s/seaweedfs/seaweedfs-cluster.yaml
+#
+# Отличия от текста методички (поля CRD оператора с тех пор изменились):
+#   • размер диска volume-сервера — volume.requests.storage (не storage.size);
+#   • S3 — отдельный шлюз верхнего уровня spec.s3 (а не filer.s3 / enableAuth);
+#     Service называется <имя>-s3 → seaweedfs-s3:8333;
+#   • ключи — через spec.s3.configSecret (identities в JSON).
+apiVersion: seaweed.seaweedfs.com/v1
+kind: Seaweed
+metadata:
+  name: seaweedfs
+  namespace: fastapi-app
+spec:
+  # Версия закреплена (не :latest). Если образ не скачивается — возьмите
+  # актуальный тег на https://hub.docker.com/r/chrislusf/seaweedfs/tags
+  image: chrislusf/seaweedfs:4.48
+  volumeServerDiskCount: 1
+
+  master:
+    replicas: 1                    # в production — 3 (кворум raft)
+    volumeSizeLimitMB: 1024        # максимальный размер ОДНОГО файла-тома
+    # master.persistence (PVC под raft-журнал) в учебном кластере не включаем:
+    # один master, а ID томов восстанавливаются из heartbeat volume-серверов.
+    requests: {cpu: 100m, memory: 128Mi}
+    limits: {cpu: 500m, memory: 512Mi}
+
+  volume:
+    replicas: 1                    # сами данные; в production — ≥ 3 + репликация
+    requests:
+      storage: 10Gi                # размер PVC volume-сервера
+      cpu: 100m
+      memory: 256Mi
+    limits: {cpu: 500m, memory: 512Mi}
+
+  filer:
+    replicas: 1
+    # Метаданные (дерево каталогов и объектов) — leveldb2 на PVC.
+    # Для HA их выносят во внешнюю БД (PostgreSQL / Redis).
+    config: |
+      [leveldb2]
+      enabled = true
+      dir = "/data/filerldb2"
+    persistence:
+      enabled: true
+      mountPath: /data
+      resources:
+        requests:
+          storage: 5Gi
+    requests: {cpu: 100m, memory: 128Mi}
+    limits: {cpu: 500m, memory: 512Mi}
+
+  # Stateless S3-шлюз (масштабируется независимо). IAM встроен, порт 8333.
+  s3:
+    replicas: 1
+    configSecret:
+      name: seaweedfs-s3-config
+      key: s3.json
+    requests: {cpu: 50m, memory: 128Mi}
+    limits: {cpu: 500m, memory: 512Mi}

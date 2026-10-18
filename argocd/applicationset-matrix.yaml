@@ -1,0 +1,57 @@
+# (Бонус) Matrix Generator: окружения (папки Git) × кластеры (зарегистрированные
+# в Argo CD с меткой tier=production). 3 окружения × N кластеров = 3N Application.
+# Требует нескольких кластеров в Argo CD; на одном Minikube не проверялся.
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: fastapi-multi-cluster
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  strategy:
+    type: RollingSync
+    rollingSync:
+      steps:
+        - matchExpressions:
+            - {key: env, operator: In, values: [dev]}
+        - matchExpressions:
+            - {key: env, operator: In, values: [staging]}
+        - matchExpressions:
+            - {key: env, operator: In, values: [prod]}
+  generators:
+    - matrix:
+        generators:
+          - git:
+              repoURL: https://github.com/YOUR_GITHUB_USER/YOUR_REPO.git
+              revision: main
+              directories:
+                - path: "environments/*"
+          - clusters:
+              selector:
+                matchLabels:
+                  tier: production
+  template:
+    metadata:
+      name: "fastapi-{{.path.basename}}-{{.name}}"
+      labels:
+        env: "{{.path.basename}}"
+    spec:
+      project: default
+      source:
+        repoURL: https://github.com/YOUR_GITHUB_USER/YOUR_REPO.git
+        targetRevision: main
+        path: helm/fastapi-platform
+        helm:
+          valueFiles:
+            - values.yaml
+            - "../../{{.path.path}}/values.yaml"
+      destination:
+        server: "{{.server}}"
+        namespace: "fastapi-{{.path.basename}}"
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true

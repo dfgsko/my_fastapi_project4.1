@@ -1,0 +1,12 @@
+# helm install fastapi-platform ./helm/fastapi-platform -n fastapi-app --create-namespace -f helm/fastapi-platform/values-dev.yaml
+global:
+  environment: dev
+fastapi-api:
+  replicaCount: 1
+  ingress:
+    enabled: true
+fastapi-worker:
+  replicaCount: 1
+  certificateDelaySeconds: 2     # чтобы на демо KEDA очередь успевала расти
+  keda:
+    enabled: false               # включить после установки KEDA: --set fastapi-worker.keda.enabled=true

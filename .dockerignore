@@ -1,0 +1,17 @@
+.git
+.github
+__pycache__
+*.pyc
+.pytest_cache
+.venv
+venv
+app.db
+certificates
+test_certificates
+k8s
+helm
+argocd
+environments
+docs
+*.md
+.env

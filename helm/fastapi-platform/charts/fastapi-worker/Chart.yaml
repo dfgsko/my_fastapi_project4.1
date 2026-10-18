@@ -1,0 +1,6 @@
+apiVersion: v2
+name: fastapi-worker
+description: Celery-воркеры (Deployment) и автомасштабирование KEDA по длине очереди RabbitMQ
+type: application
+version: 0.1.0
+appVersion: "1.2.0"

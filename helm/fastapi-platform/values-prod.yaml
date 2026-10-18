@@ -1,0 +1,25 @@
+# Продовое окружение: внешний PostgreSQL (CloudNativePG), реплики, KEDA.
+# Пароли здесь НЕ хранятся: global.existingSecret указывает на Secret,
+# созданный отдельно (Sealed Secrets / External Secrets / kubectl).
+global:
+  environment: production
+  database:
+    host: postgres-cluster-rw
+  existingSecret: fastapi-platform-secrets
+fastapi-api:
+  replicaCount: 3
+  image:
+    repository: ghcr.io/YOUR_GITHUB_USER/fastapi-app
+    tag: "v1.2.0"
+  ingress:
+    enabled: true
+    host: fastapi.example.com
+fastapi-worker:
+  image:
+    repository: ghcr.io/YOUR_GITHUB_USER/fastapi-worker
+    tag: "v1.2.0"
+  keda:
+    enabled: true
+infrastructure:
+  postgresql:
+    enabled: false

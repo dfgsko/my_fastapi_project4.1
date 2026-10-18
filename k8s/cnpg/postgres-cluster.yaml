@@ -1,0 +1,45 @@
+# Высокодоступный PostgreSQL через оператор CloudNativePG.
+# Заменяет k8s/10-postgres.yaml (StatefulSet). Порядок:
+#   1. helm install cnpg cnpg/cloudnative-pg -n cnpg-system --create-namespace
+#   2. kubectl apply -f k8s/cnpg/postgres-cluster.yaml
+#   3. в k8s/01-configmap.yaml поставить DATABASE_HOST: "postgres-cluster-rw"
+#      (оператор сам создаёт Service -rw для primary и -ro для реплик)
+# Пароль должен совпадать с DATABASE_PASSWORD в k8s/02-secrets.yaml.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: postgres-credentials
+  namespace: fastapi-app
+type: kubernetes.io/basic-auth       # CNPG требует именно этот тип
+stringData:
+  username: appuser
+  password: securePassword123
+---
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: postgres-cluster
+  namespace: fastapi-app
+spec:
+  instances: 3                       # 1 primary + 2 standby, стриминговая репликация
+  imageName: ghcr.io/cloudnative-pg/postgresql:16.4
+  postgresql:
+    parameters:
+      max_connections: "200"
+      shared_buffers: "128MB"
+      effective_cache_size: "512MB"
+  bootstrap:
+    initdb:
+      database: appdb
+      owner: appuser
+      secret:
+        name: postgres-credentials
+  storage:
+    size: 1Gi
+  resources:
+    requests: {memory: 256Mi, cpu: 100m}
+    limits: {memory: 512Mi, cpu: 500m}
+  # monitoring.enablePodMonitor требует CRD Prometheus Operator —
+  # включайте, только если он установлен.
+  monitoring:
+    enablePodMonitor: false

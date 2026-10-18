@@ -1,0 +1,41 @@
+{{- $secretName := default (printf "%s-credentials" .Values.clusterName) .Values.existingSecret }}
+{{- if not .Values.existingSecret }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $secretName }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+type: kubernetes.io/basic-auth
+stringData:
+  username: {{ .Values.credentials.username | quote }}
+  password: {{ .Values.credentials.password | quote }}
+---
+{{- end }}
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: {{ .Values.clusterName }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  instances: {{ .Values.instances }}
+  imageName: {{ .Values.imageName | quote }}
+  postgresql:
+    parameters:
+      {{- toYaml .Values.parameters | nindent 6 }}
+  bootstrap:
+    initdb:
+      database: {{ .Values.database }}
+      owner: {{ .Values.owner }}
+      secret:
+        name: {{ $secretName }}
+  storage:
+    size: {{ .Values.storage.size }}
+    {{- if .Values.storage.storageClass }}
+    storageClass: {{ .Values.storage.storageClass | quote }}
+    {{- end }}
+  resources:
+    {{- toYaml .Values.resources | nindent 4 }}
+  monitoring:
+    enablePodMonitor: {{ .Values.podMonitor.enabled }}

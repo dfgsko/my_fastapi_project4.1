@@ -1,0 +1,6 @@
+apiVersion: v2
+name: postgres-cluster
+description: Кластер PostgreSQL (ресурс Cluster оператора CloudNativePG). Оператор ставится отдельно.
+type: application
+version: 0.1.0
+appVersion: "16.4"

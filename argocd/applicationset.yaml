@@ -1,0 +1,72 @@
+# ApplicationSet с Git Directory Generator: каждая папка environments/*
+# автоматически превращается в Application (fastapi-dev, fastapi-staging,
+# fastapi-prod). Добавили папку environments/qa — появился fastapi-qa.
+#
+# Progressive Sync (RollingSync) — бета-функция Argo CD, по умолчанию
+# выключена: включите --enable-progressive-syncs у ApplicationSet-контроллера
+# (или ARGOCD_APPLICATIONSET_CONTROLLER_ENABLE_PROGRESSIVE_SYNCS=true).
+# Если не включаете — удалите блок strategy.
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: fastapi-platform-envs
+  namespace: argocd
+spec:
+  goTemplate: true
+  goTemplateOptions: ["missingkey=error"]
+  generators:
+    - git:
+        repoURL: https://github.com/YOUR_GITHUB_USER/YOUR_REPO.git
+        revision: main
+        directories:
+          - path: "environments/*"
+  strategy:
+    type: RollingSync
+    rollingSync:
+      steps:
+        - matchExpressions:
+            - {key: env, operator: In, values: [dev]}
+        - matchExpressions:
+            - {key: env, operator: In, values: [staging]}
+        - matchExpressions:
+            - {key: env, operator: In, values: [prod]}
+  template:
+    metadata:
+      name: "fastapi-{{.path.basename}}"
+      labels:
+        env: "{{.path.basename}}"
+      annotations:
+        argocd-image-updater.argoproj.io/image-list: >-
+          api=ghcr.io/YOUR_GITHUB_USER/fastapi-app:~1.2,
+          worker=ghcr.io/YOUR_GITHUB_USER/fastapi-worker:~1.2
+        argocd-image-updater.argoproj.io/api.update-strategy: semver
+        argocd-image-updater.argoproj.io/api.allow-tags: "regexp:^v1\\.2\\.\\d+$"
+        argocd-image-updater.argoproj.io/api.helm.image-name: fastapi-api.image.repository
+        argocd-image-updater.argoproj.io/api.helm.image-tag: fastapi-api.image.tag
+        argocd-image-updater.argoproj.io/worker.update-strategy: semver
+        argocd-image-updater.argoproj.io/worker.allow-tags: "regexp:^v1\\.2\\.\\d+$"
+        argocd-image-updater.argoproj.io/worker.helm.image-name: fastapi-worker.image.repository
+        argocd-image-updater.argoproj.io/worker.helm.image-tag: fastapi-worker.image.tag
+        argocd-image-updater.argoproj.io/write-back-method: git
+        argocd-image-updater.argoproj.io/git-branch: main
+        argocd-image-updater.argoproj.io/write-back-target: "helmvalues:/{{.path.path}}/values.yaml"
+    spec:
+      project: default
+      source:
+        repoURL: https://github.com/YOUR_GITHUB_USER/YOUR_REPO.git
+        targetRevision: main
+        path: helm/fastapi-platform
+        helm:
+          releaseName: "fastapi-{{.path.basename}}"
+          valueFiles:
+            - values.yaml
+            - "../../{{.path.path}}/values.yaml"
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: "fastapi-{{.path.basename}}"
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true

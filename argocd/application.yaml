@@ -1,0 +1,49 @@
+# Один Application для одного окружения (шаг 11.3) + аннотации Image Updater
+# (шаг 12). Альтернатива — argocd/applicationset.yaml (не применяйте оба
+# сразу: оба описывают одни и те же окружения).
+#
+#   kubectl apply -f argocd/application.yaml
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: fastapi-platform-prod
+  namespace: argocd
+  annotations:
+    # --- Argo CD Image Updater -------------------------------------------
+    # Образы API и воркера. «~1.2» = только patch-обновления 1.2.x
+    # (в отличие от «^1.2», который допускает и 1.3, 1.4, ...).
+    argocd-image-updater.argoproj.io/image-list: >-
+      api=ghcr.io/YOUR_GITHUB_USER/fastapi-app:~1.2,
+      worker=ghcr.io/YOUR_GITHUB_USER/fastapi-worker:~1.2
+    argocd-image-updater.argoproj.io/api.update-strategy: semver
+    argocd-image-updater.argoproj.io/api.allow-tags: "regexp:^v1\\.2\\.\\d+$"
+    argocd-image-updater.argoproj.io/api.helm.image-name: fastapi-api.image.repository
+    argocd-image-updater.argoproj.io/api.helm.image-tag: fastapi-api.image.tag
+    argocd-image-updater.argoproj.io/worker.update-strategy: semver
+    argocd-image-updater.argoproj.io/worker.allow-tags: "regexp:^v1\\.2\\.\\d+$"
+    argocd-image-updater.argoproj.io/worker.helm.image-name: fastapi-worker.image.repository
+    argocd-image-updater.argoproj.io/worker.helm.image-tag: fastapi-worker.image.tag
+    # Git write-back: обновлённый тег коммитится в values-файл окружения.
+    argocd-image-updater.argoproj.io/write-back-method: git
+    argocd-image-updater.argoproj.io/git-branch: main
+    argocd-image-updater.argoproj.io/write-back-target: "helmvalues:/environments/prod/values.yaml"
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/YOUR_GITHUB_USER/YOUR_REPO.git
+    targetRevision: main
+    path: helm/fastapi-platform
+    helm:
+      releaseName: fastapi-platform
+      valueFiles:
+        - values.yaml
+        - ../../environments/prod/values.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: fastapi-prod
+  syncPolicy:
+    automated:
+      prune: true        # удалённое из Git — удаляется из кластера
+      selfHeal: true     # ручные правки в кластере откатываются к Git
+    syncOptions:
+      - CreateNamespace=true

@@ -1,0 +1,91 @@
+# monitoring/loki-values.yaml — Loki (чарт grafana/loki 7.x), режим SingleBinary
+#
+#   helm repo add grafana https://grafana.github.io/helm-charts
+#   helm install loki grafana/loki -n monitoring -f monitoring/loki-values.yaml
+#
+# Один под выполняет все роли; чанки и индекс лежат на PVC (filesystem).
+# Для production — объектное хранилище (S3/SeaweedFS) и режим SimpleScalable.
+
+deploymentMode: SingleBinary
+
+loki:
+  auth_enabled: false
+  commonConfig:
+    replication_factor: 1          # обязательно для SingleBinary
+  storage:
+    type: filesystem
+  schemaConfig:
+    configs:
+      - from: "2024-01-01"
+        store: tsdb                # современный формат индекса
+        object_store: filesystem
+        schema: v13
+        index:
+          prefix: loki_index_
+          period: 24h
+  limits_config:
+    retention_period: 168h         # хранить логи 7 дней
+    ingestion_rate_mb: 10
+    ingestion_burst_size_mb: 20
+    reject_old_samples: true
+    reject_old_samples_max_age: 168h
+  # Компактор физически удаляет логи старше retention_period.
+  compactor:
+    retention_enabled: true
+    delete_request_store: filesystem
+
+singleBinary:
+  replicas: 1
+  resources:
+    requests: {memory: 256Mi, cpu: 100m}
+    limits: {memory: 512Mi, cpu: 500m}
+  persistence:
+    enabled: true
+    size: 10Gi
+    storageClass: standard         # у чарта ключ storageClass (не storageClassName)
+
+# Gateway (nginx) даёт стабильный адрес http://loki-gateway.monitoring.svc —
+# именно на него ссылаются Alloy (запись) и Grafana (чтение).
+gateway:
+  enabled: true
+  replicas: 1
+  resources:
+    requests: {memory: 64Mi, cpu: 50m}
+    limits: {memory: 128Mi, cpu: 200m}
+
+# Кэши в монолитном режиме не нужны и съедают память.
+chunksCache:
+  enabled: false
+resultsCache:
+  enabled: false
+
+# Остальные режимы выключены (в SingleBinary они не используются).
+backend: {replicas: 0}
+read: {replicas: 0}
+write: {replicas: 0}
+ingester: {replicas: 0}
+querier: {replicas: 0}
+queryFrontend: {replicas: 0}
+queryScheduler: {replicas: 0}
+distributor: {replicas: 0}
+compactor: {replicas: 0}
+indexGateway: {replicas: 0}
+bloomPlanner: {replicas: 0}
+bloomBuilder: {replicas: 0}
+bloomGateway: {replicas: 0}
+
+# Экономим ресурсы кластера.
+lokiCanary:
+  enabled: false
+test:
+  enabled: false
+
+# Метрики самого Loki в Prometheus (ServiceMonitor).
+monitoring:
+  serviceMonitor:
+    enabled: true
+    labels:
+      release: monitoring
+
+rbac:
+  create: true

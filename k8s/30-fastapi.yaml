@@ -1,0 +1,69 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fastapi
+  namespace: fastapi-app
+spec:
+  replicas: 2                    # пока одну реплику обновляют, вторая держит трафик
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0          # zero-downtime
+  selector:
+    matchLabels:
+      app: fastapi
+  template:
+    metadata:
+      labels:
+        app: fastapi
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+      containers:
+        - name: api
+          image: fastapi-app:latest     # для реестра: ghcr.io/<user>/fastapi-app:<tag>
+          imagePullPolicy: IfNotPresent # образ собран внутри Minikube (docker-env)
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - configMapRef: {name: app-config}
+            - secretRef: {name: app-secrets}
+            # S3 (SeaweedFS): endpoint/бакет и ключи доступа — лаб. № 4.
+            - configMapRef: {name: s3-config}
+            - secretRef: {name: app-s3-secrets}
+          # Приложение стартует ~5 с, поэтому liveness начинается с запасом (10 с):
+          # преждевременная liveness-проба убила бы под во время запуска.
+          livenessProbe:
+            httpGet: {path: /health, port: 8000}
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          # Readiness проверяет PostgreSQL и Redis: при сбое под выводится
+          # из балансировки, но не перезапускается.
+          readinessProbe:
+            httpGet: {path: /ready, port: 8000}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+          resources:
+            requests: {memory: 128Mi, cpu: 100m}
+            limits: {memory: 256Mi, cpu: 500m}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: fastapi-service
+  namespace: fastapi-app
+  # Метка и имя порта нужны ServiceMonitor (k8s/monitoring/fastapi-servicemonitor.yaml).
+  labels:
+    app: fastapi
+spec:
+  type: ClusterIP
+  selector:
+    app: fastapi
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8000

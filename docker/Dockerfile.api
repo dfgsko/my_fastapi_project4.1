@@ -1,0 +1,26 @@
+# syntax=docker/dockerfile:1
+# ---- Этап 1: сборка зависимостей --------------------------------------
+FROM python:3.11-slim AS builder
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir --user -r requirements.txt
+
+# ---- Этап 2: финальный образ (без pip-кэша и компиляторов) ------------
+FROM python:3.11-slim
+# Фиксированный UID/GID: Kubernetes (runAsNonRoot) должен знать, что
+# пользователь не root, а имя «appuser» он проверить не может.
+RUN groupadd --gid 1000 appuser \
+ && useradd --uid 1000 --gid 1000 --create-home appuser
+WORKDIR /app
+COPY --from=builder /root/.local /home/appuser/.local
+# migrations/ и alembic.ini нужны Job-у `alembic upgrade head` (тот же образ).
+COPY --chown=appuser:appuser app/ ./app/
+COPY --chown=appuser:appuser migrations/ ./migrations/
+COPY --chown=appuser:appuser alembic.ini ./
+RUN mkdir -p /app/certificates && chown appuser:appuser /app/certificates
+USER 1000:1000
+ENV PATH=/home/appuser/.local/bin:$PATH \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
+EXPOSE 8000
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

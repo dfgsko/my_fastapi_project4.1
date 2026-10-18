@@ -1,0 +1,42 @@
+{{- if .Values.keda.enabled }}
+# Креды RabbitMQ KEDA берёт из Secret (ключ RABBITMQ_URL), а не из
+# открытого текста в ScaledObject.
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: {{ include "fastapi-worker.fullname" . }}-rabbitmq-auth
+  labels:
+    {{- include "fastapi-worker.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  secretTargetRef:
+    - parameter: host
+      name: {{ include "fastapi-worker.secretName" . }}
+      key: RABBITMQ_URL
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: {{ include "fastapi-worker.fullname" . }}-scaler
+  labels:
+    {{- include "fastapi-worker.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  scaleTargetRef:
+    name: {{ include "fastapi-worker.fullname" . }}
+  pollingInterval: {{ .Values.keda.pollingInterval }}
+  cooldownPeriod: {{ .Values.keda.cooldownPeriod }}
+  minReplicaCount: {{ .Values.keda.minReplicaCount }}
+  maxReplicaCount: {{ .Values.keda.maxReplicaCount }}
+  triggers:
+    - type: rabbitmq
+      metadata:
+        protocol: amqp
+        queueName: {{ .Values.keda.queueName | quote }}
+        mode: QueueLength
+        value: {{ .Values.keda.queueLength | quote }}
+      authenticationRef:
+        name: {{ include "fastapi-worker.fullname" . }}-rabbitmq-auth
+{{- end }}

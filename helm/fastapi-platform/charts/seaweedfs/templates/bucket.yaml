@@ -1,0 +1,40 @@
+apiVersion: seaweed.seaweedfs.com/v1
+kind: Bucket
+metadata:
+  name: {{ .Values.bucket.name }}
+  labels:
+    {{- include "seaweedfs.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  clusterRef:
+    name: {{ .Values.clusterName }}
+  name: {{ .Values.bucket.name }}
+  quota:
+    size: {{ .Values.bucket.quota }}
+  versioning: "Off"
+  reclaimPolicy: {{ .Values.bucket.reclaimPolicy }}
+{{- if .Values.lifecycle.enabled }}
+---
+apiVersion: seaweed.seaweedfs.com/v1
+kind: BucketLifecyclePolicy
+metadata:
+  name: expire-old-uploads
+  labels:
+    {{- include "seaweedfs.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  bucketRef:
+    name: {{ .Values.bucket.name }}
+  rules:
+    - id: expire-old-uploads
+      prefix: uploads/
+      status: Enabled
+      expiration:
+        days: {{ .Values.lifecycle.expireDays }}
+    - id: cleanup-incomplete-uploads
+      status: Enabled
+      abortIncompleteMultipartUpload:
+        daysAfterInitiation: 7
+{{- end }}

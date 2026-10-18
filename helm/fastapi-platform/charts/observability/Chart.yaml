@@ -1,0 +1,6 @@
+apiVersion: v2
+name: observability
+description: Подключение приложения к мониторингу — ServiceMonitor для API и Flower (экспортёр метрик Celery). Сам стек (Prometheus, Grafana, Loki, Alloy) ставится отдельно, см. monitoring/
+type: application
+version: 0.1.0
+appVersion: "1.0.0"

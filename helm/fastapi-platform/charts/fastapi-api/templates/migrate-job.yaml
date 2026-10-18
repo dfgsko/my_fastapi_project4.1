@@ -1,0 +1,42 @@
+{{- if .Values.migrations.enabled }}
+# Helm-hook: запускается после установки/обновления (когда БД уже создана
+# в этом же релизе) и повторяется, пока PostgreSQL не станет доступен.
+# Argo CD транслирует post-install/post-upgrade в PostSync-хук.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}-db-migrate
+  labels:
+    {{- include "fastapi-api.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-weight: "0"
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 12
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: db-migrate
+        app.kubernetes.io/instance: {{ .Release.Name }}
+    spec:
+      restartPolicy: OnFailure
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+      containers:
+        - name: migrate
+          image: {{ include "fastapi-api.image" . | quote }}
+          imagePullPolicy: {{ .Values.global.image.pullPolicy }}
+          command: ["alembic", "upgrade", "head"]
+          envFrom:
+            - configMapRef:
+                name: {{ include "fastapi-api.configName" . }}
+            - secretRef:
+                name: {{ include "fastapi-api.secretName" . }}
+          securityContext:
+            allowPrivilegeEscalation: false
+          resources:
+            requests: {memory: 128Mi, cpu: 100m}
+            limits: {memory: 256Mi, cpu: 500m}
+{{- end }}

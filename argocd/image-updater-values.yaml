@@ -1,0 +1,14 @@
+# helm install argocd-image-updater argo/argocd-image-updater -n argocd -f argocd/image-updater-values.yaml
+# ВАЖНО: формат конфигурации зависит от версии чарта/Image Updater. Ниже —
+# вариант из лабораторной (аннотации на Application). В версиях 1.x
+# конфигурация постепенно переезжает на CRD ImageUpdater — сверяйтесь с
+# документацией той версии, которую ставите.
+config:
+  registries:
+    - name: GHCR
+      prefix: ghcr.io
+      api_url: https://ghcr.io
+      # kubectl create secret generic ghcr-creds -n argocd --from-literal=creds=USER:TOKEN
+      credentials: secret:argocd/ghcr-creds#creds
+  gitCommitUser: argocd-image-updater
+  gitCommitMail: image-updater@example.com

@@ -1,0 +1,41 @@
+# Бакет для файлов приложения (декларативно, через CRD Bucket оператора).
+# В актуальной версии CRD ссылка на кластер — spec.clusterRef, имя бакета —
+# spec.name, квота — spec.quota.size (в методичке были seaweedRef/bucketName).
+#
+#   kubectl apply -f k8s/seaweedfs/seaweedfs-bucket.yaml
+#   kubectl get bucket -n fastapi-app
+apiVersion: seaweed.seaweedfs.com/v1
+kind: Bucket
+metadata:
+  name: fastapi-files
+  namespace: fastapi-app
+spec:
+  clusterRef:
+    name: seaweedfs
+  name: fastapi-files
+  quota:
+    size: 1Gi                  # 1 GiB; enforce: true по умолчанию
+  versioning: "Off"
+  reclaimPolicy: Retain        # данные переживают удаление CR (защита от случайного delete)
+---
+# Опционально: жизненный цикл объектов — загрузки старше 30 дней удаляются.
+# (В методичке — закомментированный блок lifecycle: в Bucket; в актуальном
+# операторе для этого есть отдельный CRD BucketLifecyclePolicy.)
+apiVersion: seaweed.seaweedfs.com/v1
+kind: BucketLifecyclePolicy
+metadata:
+  name: expire-old-uploads
+  namespace: fastapi-app
+spec:
+  bucketRef:
+    name: fastapi-files
+  rules:
+    - id: expire-old-uploads
+      prefix: uploads/
+      status: Enabled
+      expiration:
+        days: 30
+    - id: cleanup-incomplete-uploads
+      status: Enabled
+      abortIncompleteMultipartUpload:
+        daysAfterInitiation: 7

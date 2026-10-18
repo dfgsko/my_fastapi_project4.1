@@ -1,0 +1,21 @@
+# Значения по умолчанию subchart; в umbrella-чарте переопределяются в
+# секции fastapi-api:. Блок global приходит от родительского чарта.
+replicaCount: 2
+image:
+  repository: fastapi-app
+  tag: latest
+resources:
+  requests: {memory: 128Mi, cpu: 100m}
+  limits: {memory: 256Mi, cpu: 500m}
+probes:
+  liveness:  {path: /health, initialDelaySeconds: 10, periodSeconds: 15}
+  readiness: {path: /ready,  initialDelaySeconds: 5,  periodSeconds: 10}
+service:
+  port: 80
+  targetPort: 8000
+ingress:
+  enabled: false
+  className: nginx
+  host: fastapi.local
+migrations:
+  enabled: true

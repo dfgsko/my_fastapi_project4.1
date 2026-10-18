@@ -1,0 +1,16 @@
+replicaCount: 2
+image:
+  repository: fastapi-worker
+  tag: latest
+certificateDelaySeconds: 0
+resources:
+  requests: {memory: 256Mi, cpu: 200m}
+  limits: {memory: 512Mi, cpu: 1000m}
+keda:
+  enabled: false
+  pollingInterval: 15
+  cooldownPeriod: 60
+  minReplicaCount: 1
+  maxReplicaCount: 20
+  queueName: celery
+  queueLength: 10

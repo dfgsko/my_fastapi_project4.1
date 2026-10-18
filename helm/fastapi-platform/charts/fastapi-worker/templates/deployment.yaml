@@ -1,0 +1,58 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "fastapi-worker.fullname" . }}
+  labels:
+    {{- include "fastapi-worker.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  {{- if not .Values.keda.enabled }}
+  # При включённом KEDA поле replicas не задаётся: им управляет HPA,
+  # иначе каждый helm upgrade сбрасывал бы число реплик.
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "fastapi-worker.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "fastapi-worker.selectorLabels" . | nindent 8 }}
+    spec:
+      terminationGracePeriodSeconds: 60
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+      containers:
+        - name: worker
+          image: {{ include "fastapi-worker.image" . | quote }}
+          imagePullPolicy: {{ .Values.global.image.pullPolicy }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "fastapi-worker.configName" . }}
+            - secretRef:
+                name: {{ include "fastapi-worker.secretName" . }}
+          env:
+            - name: CERTIFICATE_DELAY_SECONDS
+              value: {{ .Values.certificateDelaySeconds | quote }}
+          volumeMounts:
+            - name: certificates
+              mountPath: /app/certificates
+          livenessProbe:
+            exec:
+              command:
+                - sh
+                - -c
+                - celery -A app.celery_app:celery_app inspect ping -d celery@$HOSTNAME --timeout 10
+            initialDelaySeconds: 30
+            periodSeconds: 60
+            timeoutSeconds: 20
+            failureThreshold: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      volumes:
+        - name: certificates
+          emptyDir: {}

@@ -1,0 +1,45 @@
+# Автомасштабирование Celery-воркеров по длине очереди RabbitMQ.
+# Требуется KEDA:  helm install keda kedacore/keda -n keda --create-namespace
+apiVersion: v1
+kind: Secret
+metadata:
+  name: keda-rabbitmq-secret
+  namespace: fastapi-app
+type: Opaque
+stringData:
+  host: amqp://guest:guest@rabbitmq:5672//
+---
+# TriggerAuthentication: KEDA читает учётные данные из Secret, а не из
+# открытого текста в ScaledObject; на неё можно выдать отдельные RBAC-права.
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: rabbitmq-auth
+  namespace: fastapi-app
+spec:
+  secretTargetRef:
+    - parameter: host
+      name: keda-rabbitmq-secret
+      key: host
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: celery-worker-scaler
+  namespace: fastapi-app
+spec:
+  scaleTargetRef:
+    name: celery-worker
+  pollingInterval: 15      # опрашивать очередь каждые 15 с
+  cooldownPeriod: 60       # ждать 60 с перед scale-down
+  minReplicaCount: 1       # 0 = scale-to-zero (см. README: когда это допустимо)
+  maxReplicaCount: 20      # потолок — защита от неконтролируемого роста
+  triggers:
+    - type: rabbitmq
+      metadata:
+        protocol: amqp
+        queueName: celery
+        mode: QueueLength
+        value: "10"        # целевая длина очереди на одного воркера
+      authenticationRef:
+        name: rabbitmq-auth

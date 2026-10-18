@@ -1,0 +1,136 @@
+name: CI — tests, chart lint, build & push images
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_API: ghcr.io/${{ github.repository_owner }}/fastapi-app
+  IMAGE_WORKER: ghcr.io/${{ github.repository_owner }}/fastapi-worker
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+      - run: pip install -r requirements-dev.txt
+      - run: pytest -v
+
+  chart-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+      - name: helm lint (dev и prod значения)
+        run: |
+          helm lint helm/fastapi-platform -f helm/fastapi-platform/values-dev.yaml
+          helm lint helm/fastapi-platform -f helm/fastapi-platform/values-prod.yaml
+          helm lint helm/postgres-cluster
+      - name: helm template (все окружения должны рендериться)
+        run: |
+          for env in dev staging prod; do
+            helm template fastapi-$env helm/fastapi-platform \
+              -f helm/fastapi-platform/values.yaml \
+              -f environments/$env/values.yaml > /dev/null
+          done
+      - name: helm template без SeaweedFS и мониторинга (кластер без их CRD)
+        run: |
+          helm template fastapi-min helm/fastapi-platform \
+            --set seaweedfs.enabled=false --set observability.enabled=false > /dev/null
+
+  # Лаб. № 4: конфигурация наблюдаемости и S3 проверяется без кластера.
+  observability-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: azure/setup-helm@v4
+      - run: pip install pyyaml
+      - name: kustomize build (дашборды, datasource, secret Grafana)
+        run: kubectl kustomize monitoring/ > /tmp/monitoring.yaml
+      - name: kubeconform (k8s-манифесты, ServiceMonitor, рендер Helm)
+        run: |
+          curl -sL https://github.com/yannh/kubeconform/releases/latest/download/kubeconform-linux-amd64.tar.gz | tar xz kubeconform
+          helm template fastapi-dev helm/fastapi-platform -f environments/dev/values.yaml > /tmp/render.yaml
+          ./kubeconform -strict -summary -ignore-missing-schemas \
+            -schema-location default \
+            -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
+            k8s /tmp/monitoring.yaml /tmp/render.yaml
+      - name: Синтаксис конфигурации Alloy (alloy validate)
+        run: |
+          python - <<'PY'
+          import yaml
+          cfg = yaml.safe_load(open("monitoring/alloy-values.yaml"))
+          open("/tmp/config.alloy", "w").write(cfg["alloy"]["configMap"]["content"] + "\n")
+          PY
+          docker run --rm -v /tmp/config.alloy:/config.alloy grafana/alloy:v1.20.1 validate /config.alloy
+      - name: Дашборды совпадают с генератором
+        run: |
+          python scripts/gen_dashboards.py
+          git diff --exit-code monitoring/grafana-dashboards
+
+  build-and-push:
+    needs: [test, chart-lint]
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Теги: sha (каждый коммит) и semver (при git tag v1.2.3 → 1.2.3 и v1.2.3).
+      # Именно semver-теги отслеживает Argo CD Image Updater.
+      - id: meta-api
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_API }}
+          tags: |
+            type=sha
+            type=semver,pattern=v{{version}}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile.api
+          push: true
+          tags: ${{ steps.meta-api.outputs.tags }}
+          labels: ${{ steps.meta-api.outputs.labels }}
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,mode=max,scope=api
+
+      - id: meta-worker
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_WORKER }}
+          tags: |
+            type=sha
+            type=semver,pattern=v{{version}}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile.worker
+          push: true
+          tags: ${{ steps.meta-worker.outputs.tags }}
+          labels: ${{ steps.meta-worker.outputs.labels }}
+          cache-from: type=gha,scope=worker
+          cache-to: type=gha,mode=max,scope=worker
+
+  # Деплоя здесь нет намеренно: кластером занимается Argo CD (pull-модель).
+  # CI только публикует образы; Image Updater коммитит новый тег в Git,
+  # Argo CD синхронизирует кластер. Kubeconfig в CI не нужен.

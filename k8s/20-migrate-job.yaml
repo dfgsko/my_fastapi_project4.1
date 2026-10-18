@@ -1,0 +1,33 @@
+# Применяет миграции Alembic (alembic upgrade head). Повторные попытки
+# нужны, потому что при первом запуске PostgreSQL может быть ещё не готов.
+# Если меняете образ и применяете повторно:  kubectl delete job db-migrate -n fastapi-app
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: db-migrate
+  namespace: fastapi-app
+spec:
+  backoffLimit: 12
+  ttlSecondsAfterFinished: 600
+  template:
+    metadata:
+      labels:
+        app: db-migrate
+    spec:
+      restartPolicy: OnFailure
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+      containers:
+        - name: migrate
+          image: fastapi-app:latest
+          imagePullPolicy: IfNotPresent
+          command: ["alembic", "upgrade", "head"]
+          envFrom:
+            - configMapRef: {name: app-config}
+            - secretRef: {name: app-secrets}
+          securityContext:
+            allowPrivilegeEscalation: false
+          resources:
+            requests: {memory: 128Mi, cpu: 100m}
+            limits: {memory: 256Mi, cpu: 500m}

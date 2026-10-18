@@ -1,0 +1,16 @@
+# Неконфиденциальные параметры S3-хранилища (SeaweedFS). Ключи доступа —
+# в Secret app-s3-secrets (k8s/02-secrets.yaml). Подключается в API и воркер
+# через envFrom, поэтому приложение не знает ничего о SeaweedFS, кроме URL.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: s3-config
+  namespace: fastapi-app
+data:
+  # <имя Seaweed-ресурса>-s3: Service создаёт оператор (k8s/seaweedfs/seaweedfs-cluster.yaml).
+  S3_ENDPOINT: "http://seaweedfs-s3:8333"
+  S3_BUCKET: "fastapi-files"
+  S3_REGION: "us-east-1"
+  S3_MAX_UPLOAD_BYTES: "10485760"        # 10 МБ
+  # Воркер дополнительно кладёт готовые PDF-сертификаты в бакет.
+  S3_UPLOAD_CERTIFICATES: "true"

@@ -1,0 +1,23 @@
+# Prometheus находит цели через ServiceMonitor (CRD kube-prometheus-stack):
+# он выбирает Service по меткам и скрейпит указанный именованный порт.
+# Обнаружение без метки release: monitoring включено в
+# monitoring/prometheus-values.yaml (serviceMonitorSelectorNilUsesHelmValues: false).
+#
+#   kubectl apply -f k8s/monitoring/
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: fastapi-monitor
+  namespace: fastapi-app
+  labels:
+    release: monitoring
+spec:
+  selector:
+    matchLabels:
+      app: fastapi            # метка Service fastapi-service
+  namespaceSelector:
+    matchNames: [fastapi-app]
+  endpoints:
+    - port: http              # имя порта в Service (80 → 8000)
+      path: /metrics
+      interval: 15s

@@ -1,0 +1,76 @@
+# ПРИМЕР (не применяется автоматически): резервное копирование CNPG в MinIO,
+# имитирующий S3. Не проверялось в среде сборки.
+#
+# 1. kubectl apply -f k8s/cnpg/backup-minio.yaml.example   (MinIO + Secret)
+# 2. Создайте бакет:  kubectl run mc --rm -it --image=minio/mc -n fastapi-app --command -- \
+#      sh -c "mc alias set m http://minio:9000 minioadmin minioadmin && mc mb -p m/postgres-backups"
+# 3. Добавьте в spec кластера (k8s/cnpg/postgres-cluster.yaml):
+#
+#    backup:
+#      barmanObjectStore:
+#        destinationPath: s3://postgres-backups/
+#        endpointURL: http://minio:9000
+#        s3Credentials:
+#          accessKeyId:     {name: s3-creds, key: ACCESS_KEY_ID}
+#          secretAccessKey: {name: s3-creds, key: SECRET_ACCESS_KEY}
+#        wal: {compression: gzip}
+#      retentionPolicy: "7d"
+#
+# Примечание: в новых версиях CNPG встроенный barmanObjectStore объявлен
+# устаревшим в пользу Barman Cloud Plugin — сверьтесь с документацией версии.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: s3-creds
+  namespace: fastapi-app
+stringData:
+  ACCESS_KEY_ID: minioadmin
+  SECRET_ACCESS_KEY: minioadmin
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: minio
+  namespace: fastapi-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: minio}
+  template:
+    metadata:
+      labels: {app: minio}
+    spec:
+      containers:
+        - name: minio
+          image: minio/minio:latest
+          args: ["server", "/data"]
+          env:
+            - {name: MINIO_ROOT_USER, value: minioadmin}
+            - {name: MINIO_ROOT_PASSWORD, value: minioadmin}
+          ports:
+            - containerPort: 9000
+          resources:
+            requests: {memory: 128Mi, cpu: 50m}
+            limits: {memory: 256Mi, cpu: 250m}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio
+  namespace: fastapi-app
+spec:
+  selector: {app: minio}
+  ports:
+    - port: 9000
+      targetPort: 9000
+---
+# Бэкап по расписанию (после добавления секции backup в Cluster)
+apiVersion: postgresql.cnpg.io/v1
+kind: ScheduledBackup
+metadata:
+  name: postgres-daily
+  namespace: fastapi-app
+spec:
+  schedule: "0 0 2 * * *"      # 6 полей (с секундами): каждый день в 02:00:00
+  cluster:
+    name: postgres-cluster

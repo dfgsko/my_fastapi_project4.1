@@ -1,0 +1,12 @@
+fastapi
+uvicorn[standard]
+sqlalchemy>=2.0
+asyncpg
+alembic
+pydantic[email]
+redis
+celery
+reportlab
+prometheus-fastapi-instrumentator
+boto3
+python-multipart

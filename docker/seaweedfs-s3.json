@@ -1,0 +1,14 @@
+{
+  "identities": [
+    {
+      "name": "admin",
+      "credentials": [{"accessKey": "app-admin-key", "secretKey": "app-admin-secret-change-me"}],
+      "actions": ["Admin", "Read", "Write", "List", "Tagging"]
+    },
+    {
+      "name": "reader",
+      "credentials": [{"accessKey": "app-reader-key", "secretKey": "app-reader-secret-change-me"}],
+      "actions": ["Read", "List"]
+    }
+  ]
+}

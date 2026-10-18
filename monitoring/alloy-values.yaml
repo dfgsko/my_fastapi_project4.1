@@ -1,0 +1,88 @@
+# monitoring/alloy-values.yaml — Grafana Alloy (агент сбора логов)
+#
+#   helm install alloy grafana/alloy -n monitoring -f monitoring/alloy-values.yaml
+#
+# Alloy заменил Promtail. Здесь он читает логи подов через Kubernetes API
+# (loki.source.kubernetes) — без hostPath и прав root, поэтому достаточно
+# ОДНОГО пода (Deployment), а не DaemonSet на каждом узле. Чарт сам создаёт
+# ClusterRole (pods, pods/log, namespaces: get/list/watch).
+
+controller:
+  type: deployment
+  replicas: 1
+
+alloy:
+  resources:
+    requests: {memory: 128Mi, cpu: 50m}
+    limits: {memory: 256Mi, cpu: 200m}
+  configMap:
+    create: true
+    content: |-
+      logging {
+        level  = "info"
+        format = "logfmt"
+      }
+
+      // 1. Все поды кластера, кроме системных namespace и самого стека мониторинга.
+      discovery.kubernetes "pods" {
+        role = "pod"
+      }
+
+      discovery.relabel "pod_logs" {
+        targets = discovery.kubernetes.pods.targets
+
+        rule {
+          source_labels = ["__meta_kubernetes_namespace"]
+          regex         = "kube-system|kube-public|kube-node-lease|monitoring"
+          action        = "drop"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_namespace"]
+          target_label  = "namespace"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_name"]
+          target_label  = "pod"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_container_name"]
+          target_label  = "container"
+        }
+        // метка app: fastapi, celery-worker, flower, postgres ...
+        rule {
+          source_labels = ["__meta_kubernetes_pod_label_app"]
+          target_label  = "app"
+        }
+        // метка Helm-чарта: fastapi-api, fastapi-worker ...
+        rule {
+          source_labels = ["__meta_kubernetes_pod_label_app_kubernetes_io_name"]
+          target_label  = "app_name"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_namespace", "__meta_kubernetes_pod_container_name"]
+          separator     = "/"
+          target_label  = "job"
+        }
+      }
+
+      // 2. Чтение логов через Kubernetes API и отправка в Loki.
+      loki.source.kubernetes "pods" {
+        targets    = discovery.relabel.pod_logs.output
+        forward_to = [loki.write.default.receiver]
+      }
+
+      // 3. Адрес Loki — gateway из monitoring/loki-values.yaml.
+      loki.write "default" {
+        endpoint {
+          url = "http://loki-gateway.monitoring.svc.cluster.local/loki/api/v1/push"
+        }
+        external_labels = {
+          cluster = "minikube",
+        }
+      }
+
+# Метрики самого Alloy (обработано строк, ошибки отправки) — в Prometheus.
+serviceMonitor:
+  enabled: true
+  additionalLabels:
+    release: monitoring

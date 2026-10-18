@@ -1,0 +1,6 @@
+apiVersion: v2
+name: infrastructure
+description: Инфраструктура стека — Redis, RabbitMQ и (для dev) PostgreSQL StatefulSet
+type: application
+version: 0.1.0
+appVersion: "1.0.0"

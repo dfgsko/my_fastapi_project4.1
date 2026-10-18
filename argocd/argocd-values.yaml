@@ -1,0 +1,13 @@
+# Облегчённые значения Argo CD для Minikube:
+#   helm install argocd argo/argo-cd -n argocd --create-namespace -f argocd/argocd-values.yaml
+# (продовый вариант — реплики, Ingress с TLS, dex — см. текст лабораторной)
+global:
+  domain: argocd.local
+server:
+  replicas: 1
+repoServer:
+  replicas: 1
+controller:
+  replicas: 1
+dex:
+  enabled: false
