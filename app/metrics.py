@@ -8,7 +8,8 @@
   • http_requests_in_progress{handler,method}       — запросы «в полёте»
       (всё это даёт prometheus-fastapi-instrumentator);
   • files_operations_total / files_bytes_total      — бизнес-метрики файлов;
-  • celery_queue_length{queue="celery"}             — длина очереди RabbitMQ.
+  • celery_queue_length{queue="celery"}             — длина очереди RabbitMQ;
+  • auth_events_total{event}                        — входы/ошибки входа/refresh (лаб. № 5).
 
 Замечания, из-за которых стандартные запросы из методички не работали бы:
   1. По умолчанию instrumentator группирует статусы («5xx»), а PromQL-фильтр
@@ -39,6 +40,12 @@ FILE_BYTES = Counter(
     "files_bytes_total",
     "Объём переданных в S3 / из S3 данных, байт",
     ["direction"],
+)
+
+AUTH_EVENTS = Counter(
+    "auth_events_total",
+    "События аутентификации (вход, обновление токена, выход, регистрация)",
+    ["event"],
 )
 
 EXCLUDED_HANDLERS = ["/metrics", "/health", "/ready"]

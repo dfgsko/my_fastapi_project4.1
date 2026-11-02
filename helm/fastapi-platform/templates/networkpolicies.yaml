@@ -1,0 +1,277 @@
+{{- if .Values.networkPolicy.enabled }}
+{{- /*
+  Network Policies (лаб. № 5): default-deny + allowlist.
+  Селекторы — по метке `app: <имя>`, которую несут и «сырые» манифесты, и Helm-поды.
+  Этот файл — единственный источник: k8s/network-policies/network-policies.yaml
+  генерируется из него командой scripts/gen-network-policies.sh (CI проверяет,
+  что они не разошлись).
+*/ -}}
+{{- $ns := .Release.Namespace }}
+{{- $ing := .Values.networkPolicy.ingressNamespace }}
+{{- $mon := .Values.networkPolicy.monitoringNamespace }}
+# 1. Запрещаем весь входящий и исходящий трафик для всех подов namespace.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: {{ $ns }}
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+# 2. DNS нужен всем (иначе не разрешатся имена сервисов). UDP и TCP:
+#    большие ответы (DNSSEC, много записей) приходят по TCP.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns-egress
+  namespace: {{ $ns }}
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: kube-system}
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
+---
+# 3. FastAPI: входящий — от Ingress-контроллера и Prometheus (/metrics).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress-to-fastapi
+  namespace: {{ $ns }}
+spec:
+  podSelector:
+    matchLabels: {app: fastapi}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: {{ $ing }}}
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: {{ $mon }}}
+      ports:
+        - {protocol: TCP, port: 8000}
+---
+# 4. FastAPI: исходящий — БД, Redis, RabbitMQ (постановка задач), S3.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-fastapi-egress
+  namespace: {{ $ns }}
+spec:
+  podSelector:
+    matchLabels: {app: fastapi}
+  policyTypes: [Egress]
+  egress:
+    - to: {{- include "np.dbSelectors" . | nindent 8 }}
+      ports: [{protocol: TCP, port: 5432}]
+    - to:
+        - podSelector: {matchLabels: {app: redis}}
+      ports: [{protocol: TCP, port: 6379}]
+    - to:
+        - podSelector: {matchLabels: {app: rabbitmq}}
+      ports: [{protocol: TCP, port: 5672}]
+    - to:
+        - podSelector: {matchLabels: {app.kubernetes.io/name: seaweedfs}}
+      ports: [{protocol: TCP, port: 8333}]
+---
+# 5. Celery-воркер: ничего не принимает; ходит в RabbitMQ, Redis, БД и S3
+#    (в S3 он кладёт готовые сертификаты — в шаблоне методички этого правила не было).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-celery-egress
+  namespace: {{ $ns }}
+spec:
+  podSelector:
+    matchLabels: {app: celery-worker}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector: {matchLabels: {app: rabbitmq}}
+      ports: [{protocol: TCP, port: 5672}]
+    - to:
+        - podSelector: {matchLabels: {app: redis}}
+      ports: [{protocol: TCP, port: 6379}]
+    - to: {{- include "np.dbSelectors" . | nindent 8 }}
+      ports: [{protocol: TCP, port: 5432}]
+    - to:
+        - podSelector: {matchLabels: {app.kubernetes.io/name: seaweedfs}}
+      ports: [{protocol: TCP, port: 8333}]
+---
+# 6. Flower: метрики забирает Prometheus; сам читает события из RabbitMQ.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-flower
+  namespace: {{ $ns }}
+spec:
+  podSelector:
+    matchLabels: {app: flower}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: {{ $mon }}}
+      ports: [{protocol: TCP, port: 5555}]
+  egress:
+    - to:
+        - podSelector: {matchLabels: {app: rabbitmq}}
+      ports: [{protocol: TCP, port: 5672}]
+---
+# 7. Job миграций: только PostgreSQL.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-migrate-egress
+  namespace: {{ $ns }}
+spec:
+  podSelector:
+    matchLabels: {app: db-migrate}
+  policyTypes: [Egress]
+  egress:
+    - to: {{- include "np.dbSelectors" . | nindent 8 }}
+      ports: [{protocol: TCP, port: 5432}]
+---
+# 8. PostgreSQL (StatefulSet): принимает только приложение и Vault (динамические секреты).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-postgres-ingress
+  namespace: {{ $ns }}
+spec:
+  podSelector:
+    matchLabels: {app: postgres}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector: {matchLabels: {app: fastapi}}
+        - podSelector: {matchLabels: {app: celery-worker}}
+        - podSelector: {matchLabels: {app: db-migrate}}
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: vault}
+      ports: [{protocol: TCP, port: 5432}]
+---
+# 9. CloudNativePG: клиенты, оператор (статус :8000), репликация между инстансами
+#    и доступ к API-серверу Kubernetes (443/6443/8443) для instance manager.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-cnpg
+  namespace: {{ $ns }}
+spec:
+  podSelector:
+    matchLabels: {cnpg.io/cluster: postgres-cluster}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector: {matchLabels: {app: fastapi}}
+        - podSelector: {matchLabels: {app: celery-worker}}
+        - podSelector: {matchLabels: {app: db-migrate}}
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: vault}
+      ports: [{protocol: TCP, port: 5432}]
+    - from:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: cnpg-system}
+        - podSelector: {matchLabels: {cnpg.io/cluster: postgres-cluster}}
+      ports:
+        - {protocol: TCP, port: 5432}
+        - {protocol: TCP, port: 8000}
+  egress:
+    - to:
+        - podSelector: {matchLabels: {cnpg.io/cluster: postgres-cluster}}
+      ports:
+        - {protocol: TCP, port: 5432}
+        - {protocol: TCP, port: 8000}
+    - to:
+        - ipBlock: {cidr: 0.0.0.0/0}
+      ports:
+        - {protocol: TCP, port: 443}
+        - {protocol: TCP, port: 6443}
+        - {protocol: TCP, port: 8443}
+---
+# 10. Redis: только API и воркер.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-redis-ingress
+  namespace: {{ $ns }}
+spec:
+  podSelector:
+    matchLabels: {app: redis}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector: {matchLabels: {app: fastapi}}
+        - podSelector: {matchLabels: {app: celery-worker}}
+      ports: [{protocol: TCP, port: 6379}]
+---
+# 11. RabbitMQ: API (постановка задач), воркеры, Flower и KEDA (длина очереди).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-rabbitmq-ingress
+  namespace: {{ $ns }}
+spec:
+  podSelector:
+    matchLabels: {app: rabbitmq}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector: {matchLabels: {app: fastapi}}
+        - podSelector: {matchLabels: {app: celery-worker}}
+        - podSelector: {matchLabels: {app: flower}}
+      ports: [{protocol: TCP, port: 5672}]
+    - from:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: keda}
+      ports:
+        - {protocol: TCP, port: 5672}
+        - {protocol: TCP, port: 15672}
+---
+# 12. SeaweedFS: компоненты общаются друг с другом (master/volume/filer/s3),
+#     оператор управляет бакетами, а S3 (8333) доступен приложению и воркеру.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-seaweedfs
+  namespace: {{ $ns }}
+spec:
+  podSelector:
+    matchLabels: {app.kubernetes.io/name: seaweedfs}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector: {matchLabels: {app.kubernetes.io/name: seaweedfs}}
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: seaweedfs-system}
+    - from:
+        - podSelector: {matchLabels: {app: fastapi}}
+        - podSelector: {matchLabels: {app: celery-worker}}
+      ports: [{protocol: TCP, port: 8333}]
+  egress:
+    - to:
+        - podSelector: {matchLabels: {app.kubernetes.io/name: seaweedfs}}
+---
+# 13. cert-manager (HTTP-01): временный под-решатель получает проверку от Let's Encrypt
+#     через Ingress-контроллер.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-acme-solver
+  namespace: {{ $ns }}
+spec:
+  podSelector:
+    matchLabels: {acme.cert-manager.io/http01-solver: "true"}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: {{ $ing }}}
+      ports: [{protocol: TCP, port: 8089}]
+{{- end }}

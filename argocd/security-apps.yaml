@@ -1,0 +1,149 @@
+# GitOps для компонентов безопасности (лаб. № 5): cert-manager, Kyverno, Vault,
+# Vault Secrets Operator, Falco и наши политики/издатели сертификатов.
+# Чарты берутся из репозиториев Helm, values — из этого Git (multi-source).
+#
+#   kubectl apply -f argocd/security-apps.yaml
+#
+# Sync waves: CRD-поставщики (cert-manager, Kyverno, Vault, VSO) → наши
+# политики и ClusterIssuer (им нужны CRD). Для чартов без закреплённой версии
+# (targetRevision "*") после первой синхронизации зафиксируйте номер версии.
+# Подставьте свой репозиторий: scripts/configure.sh <логин> <репозиторий>
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cert-manager
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  project: default
+  source:
+    repoURL: https://charts.jetstack.io
+    chart: cert-manager
+    targetRevision: "^1.0.0"
+    helm:
+      parameters:
+        - name: crds.enabled
+          value: "true"
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: cert-manager
+  syncPolicy:
+    automated: {prune: true, selfHeal: true}
+    syncOptions: [CreateNamespace=true, ServerSideApply=true]
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kyverno
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  project: default
+  source:
+    repoURL: https://kyverno.github.io/kyverno/
+    chart: kyverno
+    targetRevision: "*"
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kyverno
+  syncPolicy:
+    automated: {prune: true, selfHeal: true}
+    syncOptions: [CreateNamespace=true, ServerSideApply=true]
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: vault
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  project: default
+  sources:
+    - repoURL: https://helm.releases.hashicorp.com
+      chart: vault
+      targetRevision: "0.*"
+      helm:
+        valueFiles:
+          - $values/security/vault-values.yaml
+    - repoURL: https://github.com/YOUR_GITHUB_USER/YOUR_REPO.git
+      targetRevision: main
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: vault
+  syncPolicy:
+    automated: {prune: true, selfHeal: true}
+    syncOptions: [CreateNamespace=true]
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: vault-secrets-operator
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  project: default
+  source:
+    repoURL: https://helm.releases.hashicorp.com
+    chart: vault-secrets-operator
+    targetRevision: "1.*"
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: vault-secrets-operator-system
+  syncPolicy:
+    automated: {prune: true, selfHeal: true}
+    syncOptions: [CreateNamespace=true, ServerSideApply=true]
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: falco
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+spec:
+  project: default
+  sources:
+    - repoURL: https://falcosecurity.github.io/charts
+      chart: falco
+      targetRevision: "*"
+      helm:
+        valueFiles:
+          - $values/security/falco-values.yaml
+    - repoURL: https://github.com/YOUR_GITHUB_USER/YOUR_REPO.git
+      targetRevision: main
+      ref: values
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: falco
+  syncPolicy:
+    automated: {prune: true, selfHeal: true}
+    # Falco запускается с привилегиями (eBPF) — namespace falco не ограничивается PSS.
+    syncOptions: [CreateNamespace=true]
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: security-policies
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/YOUR_GITHUB_USER/YOUR_REPO.git
+    targetRevision: main
+    path: security
+    directory:
+      include: "{kyverno-policies.yaml,cert-manager-issuers.yaml}"   # values-файлы не применяем
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: default
+  syncPolicy:
+    automated: {prune: true, selfHeal: true}
+    # ClusterPolicy/ClusterIssuer зависят от CRD, которые ставят соседние Application.
+    syncOptions: [SkipDryRunOnMissingResource=true]

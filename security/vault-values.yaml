@@ -1,0 +1,17 @@
+# HashiCorp Vault для Minikube — DEV-режим (лаб. № 5).
+# ВНИМАНИЕ: dev-сервер хранит данные в памяти, запечатан автоматически,
+# root-токен известен — только для обучения. В production: HA (raft), auto-unseal
+# (KMS), TLS, аудит, отдельные политики.
+#
+#   helm install vault hashicorp/vault -n vault --create-namespace -f security/vault-values.yaml
+server:
+  dev:
+    enabled: true
+    devRootToken: root
+  resources:
+    requests: {cpu: 100m, memory: 128Mi}
+    limits: {cpu: 500m, memory: 256Mi}
+injector:
+  enabled: false           # вместо sidecar-инжектора используется Vault Secrets Operator
+ui:
+  enabled: true

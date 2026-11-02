@@ -11,12 +11,16 @@ from app.enums import EnrollmentStatus
 class EnrollmentCreate(BaseModel):
     """Модель для записи студента на курс (POST /enrollments)."""
 
+    model_config = ConfigDict(extra="forbid")  # Mass Assignment: лишние поля → 422
+
     student_id: int = Field(..., description="ID студента", examples=[1])
     course_id: int = Field(..., description="ID курса", examples=[1])
 
 
 class EnrollmentCompleteRequest(BaseModel):
     """Модель для отметки курса как завершённого (PATCH .../complete)."""
+
+    model_config = ConfigDict(extra="forbid")  # Mass Assignment: лишние поля → 422
 
     grade: float = Field(
         ...,

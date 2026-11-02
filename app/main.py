@@ -24,8 +24,20 @@ from fastapi import FastAPI
 from app.config import auto_create_tables
 from app.database import Base, engine
 from app.redis_client import close_redis, init_redis
+from app.bootstrap import ensure_bootstrap_admin
+from app.config import docs_enabled
 from app.metrics import setup_metrics
-from app.routers import admin, courses, enrollments, files, health, students
+from app.routers import (
+    admin,
+    auth,
+    courses,
+    enrollments,
+    files,
+    health,
+    students,
+    users,
+)
+from app.security import setup_security
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -40,6 +52,7 @@ async def lifespan(app: FastAPI):
     if auto_create_tables():
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+    await ensure_bootstrap_admin()  # первый администратор из ADMIN_BOOTSTRAP_*
     await init_redis()
 
     yield
@@ -55,13 +68,19 @@ app = FastAPI(
         "REST API для образовательной платформы: курсы, студенты и "
         "зачисления, с кэшированием (Redis), rate limiting, фоновой "
         "генерацией сертификатов (Celery), файлами в S3 (SeaweedFS) и "
-        "метриками Prometheus (/metrics)."
+        "метриками Prometheus (/metrics). Доступ — по JWT (роли admin/user)."
     ),
-    version="4.0.0",
+    version="5.0.0",
     lifespan=lifespan,
+    # В production документацию API можно скрыть: DOCS_ENABLED=false.
+    docs_url="/docs" if docs_enabled() else None,
+    redoc_url="/redoc" if docs_enabled() else None,
+    openapi_url="/openapi.json" if docs_enabled() else None,
 )
 
 app.include_router(health.router)
+app.include_router(auth.router)
+app.include_router(users.router)
 app.include_router(courses.router)
 app.include_router(students.router)
 app.include_router(enrollments.router)
@@ -71,7 +90,10 @@ app.include_router(files.router)
 # /metrics для Prometheus (лабораторная № 4): запросы, задержки, очередь Celery.
 setup_metrics(app)
 
+# Заголовки безопасности, Host/CORS, закрытие /metrics от Ingress (лаб. № 5).
+setup_security(app)
+
 
 @app.get("/", tags=["health"], summary="Проверка работоспособности сервера")
 def root() -> dict:
-    return {"status": "ok", "service": "Educational Platform API", "version": "4.0.0"}
+    return {"status": "ok", "service": "Educational Platform API", "version": "5.0.0"}

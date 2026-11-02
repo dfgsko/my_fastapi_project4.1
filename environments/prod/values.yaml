@@ -21,3 +21,10 @@ fastapi-worker:
   certificateDelaySeconds: 0
   keda:
     enabled: true
+
+# Лаб. № 5: секреты (SECRET_KEY, пароли БД и брокера) берутся из HashiCorp Vault
+# через Vault Secrets Operator; в Git их нет. Подготовка: scripts/vault-setup.sh
+# с VAULT_PATH=fastapi/prod и NS=fastapi-prod (см. README, «Лабораторная № 5»).
+vault:
+  enabled: true
+  path: fastapi/prod

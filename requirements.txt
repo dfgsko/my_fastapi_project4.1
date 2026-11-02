@@ -10,3 +10,5 @@ reportlab
 prometheus-fastapi-instrumentator
 boto3
 python-multipart
+PyJWT
+bcrypt

@@ -25,10 +25,24 @@ global:
     secretKey: app-admin-secret-change-me
     readAccessKey: app-reader-key
     readSecretKey: app-reader-secret-change-me
+  # JWT и безопасность приложения (лаб. № 5).
+  jwt:
+    # Ключ подписи JWT. В dev — учебное значение; в staging/prod приложение
+    # и чарт отказываются работать без нормального ключа (Vault / existingSecret).
+    secretKey: ""
+  bootstrap:
+    username: admin
+    password: ChangeMe-Admin-2026   # учебное; в prod — existingSecret
+    existingSecret: ""              # Secret с ADMIN_BOOTSTRAP_USERNAME / _PASSWORD
+  security:
+    trustedHosts: ""                # "" → хосты Ingress и Service
+    corsOrigins: ""
+    docsEnabled: true
   # Готовый Secret вместо создаваемого чартом. Должен содержать ключи
   # DATABASE_USER, DATABASE_PASSWORD, RABBITMQ_DEFAULT_USER,
-  # RABBITMQ_DEFAULT_PASS, RABBITMQ_URL (amqp://user:pass@host:5672//) и,
-  # для S3, S3_ACCESS_KEY, S3_SECRET_KEY, S3_READ_ACCESS_KEY, S3_READ_SECRET_KEY.
+  # RABBITMQ_DEFAULT_PASS, RABBITMQ_URL (amqp://user:pass@host:5672//),
+  # SECRET_KEY и, для S3, S3_ACCESS_KEY, S3_SECRET_KEY, S3_READ_ACCESS_KEY,
+  # S3_READ_SECRET_KEY.
   existingSecret: ""
 
 # ---- API ----
@@ -45,6 +59,10 @@ fastapi-api:
     enabled: false
     className: nginx
     host: fastapi.local
+    tls:
+      enabled: false             # лаб. № 5: TLS через cert-manager
+      clusterIssuer: selfsigned-issuer   # letsencrypt-prod для реального домена
+      secretName: ""             # "" → <release>-tls
   migrations:
     enabled: true                # Helm-hook Job: alembic upgrade head
 
@@ -89,3 +107,23 @@ seaweedfs:
 #   --set observability.enabled=false
 observability:
   enabled: true
+
+# ---- Безопасность (лаб. № 5) ----
+# NetworkPolicy: default-deny + allowlist для API, воркеров, БД, брокера,
+# SeaweedFS. Нужен CNI с поддержкой политик (Minikube: --cni=calico).
+networkPolicy:
+  enabled: true
+  ingressNamespace: ingress-nginx   # откуда приходит внешний трафик
+  monitoringNamespace: monitoring   # Prometheus (скрейп /metrics)
+
+# HashiCorp Vault + Vault Secrets Operator: Secret <release>-secrets
+# заполняется из Vault (kv-v2), а не создаётся чартом. Нужны Vault, VSO и
+# настроенная роль (scripts/vault-setup.sh).
+vault:
+  enabled: false
+  address: http://vault.vault.svc.cluster.local:8200
+  mount: secret                     # kv-v2
+  path: fastapi/config              # secret/data/fastapi/config
+  role: fastapi-role
+  authMount: kubernetes
+  refreshAfter: 30s

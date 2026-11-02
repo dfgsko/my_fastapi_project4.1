@@ -15,6 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth import get_current_user, require_admin
 from app.database import get_db
 from app.db_models.course import Course as CourseORM
 from app.models.course import Course, CourseCreate, CourseUpdate
@@ -42,8 +43,9 @@ async def _invalidate_courses_cache() -> None:
 
 @router.get(
     "",
+    dependencies=[Depends(get_current_user)],
     response_model=List[Course],
-    summary="Получить список курсов",
+    summary="Получить список курсов (нужна аутентификация)",
     description="Список курсов с опциональной фильтрацией по преподавателю "
     "и диапазону длительности. Результат запроса с фильтром по "
     "преподавателю кэшируется в Redis на 3 минуты.",
@@ -100,6 +102,7 @@ async def list_courses(
 
 @router.get(
     "/{course_id}",
+    dependencies=[Depends(get_current_user)],
     response_model=Course,
     summary="Получить курс по ID",
     responses={status.HTTP_404_NOT_FOUND: {"description": "Курс не найден"}},
@@ -118,9 +121,10 @@ async def get_course(
 
 @router.post(
     "",
+    dependencies=[Depends(require_admin)],
     response_model=Course,
     status_code=status.HTTP_201_CREATED,
-    summary="Создать новый курс",
+    summary="Создать новый курс (admin)",
 )
 async def create_course(
     course_in: CourseCreate, session: AsyncSession = Depends(get_db)
@@ -136,8 +140,9 @@ async def create_course(
 
 @router.put(
     "/{course_id}",
+    dependencies=[Depends(require_admin)],
     response_model=Course,
-    summary="Обновить курс",
+    summary="Обновить курс (admin)",
     responses={status.HTTP_404_NOT_FOUND: {"description": "Курс не найден"}},
 )
 async def update_course(
@@ -162,8 +167,9 @@ async def update_course(
 
 @router.delete(
     "/{course_id}",
+    dependencies=[Depends(require_admin)],
     status_code=status.HTTP_204_NO_CONTENT,
-    summary="Удалить курс",
+    summary="Удалить курс (admin)",
     responses={status.HTTP_404_NOT_FOUND: {"description": "Курс не найден"}},
 )
 async def delete_course(

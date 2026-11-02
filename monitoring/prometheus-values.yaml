@@ -171,6 +171,34 @@ additionalPrometheusRulesMap:
               summary: "Задачи Celery завершаются с ошибкой"
               description: "Скорость падения задач — {{ $value | humanize }} в секунду."
 
+      - name: security
+        rules:
+          # Много неудачных входов подряд = подбор пароля (OWASP API2). Лимиты на
+          # логин (429) замедляют атаку, а алерт сообщает о ней.
+          - alert: AuthBruteForce
+            expr: sum(rate(auth_events_total{event="login_failure"}[5m])) > 0.5
+            for: 5m
+            labels: {severity: critical, component: auth}
+            annotations:
+              summary: "Подозрение на подбор паролей"
+              description: "Неудачных входов — {{ $value | humanize }} в секунду уже 5 минут (порог 0.5/с)."
+
+          # refresh-токен предъявлен повторно: либо кража, либо баг клиента.
+          - alert: RefreshTokenReuse
+            expr: sum(increase(auth_events_total{event="refresh_reuse"}[10m])) > 0
+            labels: {severity: warning, component: auth}
+            annotations:
+              summary: "Повторное использование refresh-токена"
+              description: "Все токены пользователя отозваны; возможна кража токена."
+
+          - alert: UnauthorizedRequestsSpike
+            expr: sum(rate(http_requests_total{status=~"401|403"}[5m])) > 1
+            for: 10m
+            labels: {severity: warning, component: auth}
+            annotations:
+              summary: "Много запросов с 401/403"
+              description: "{{ $value | humanize }} запросов/с отклонены по авторизации (сканирование API, перебор ID?)."
+
       - name: storage
         rules:
           - alert: FileStorageErrors

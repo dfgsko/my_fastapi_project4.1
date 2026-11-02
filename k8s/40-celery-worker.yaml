@@ -16,9 +16,14 @@ spec:
         app: celery-worker
     spec:
       terminationGracePeriodSeconds: 60   # warm shutdown: доработать текущую задачу
+      automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 2000
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: worker
           image: fastapi-worker:latest
@@ -37,6 +42,7 @@ spec:
           volumeMounts:
             - name: certificates
               mountPath: /app/certificates
+            - {name: tmp, mountPath: /tmp}
           # HTTP-эндпоинта у воркера нет → exec-проба. Пингуем именно этот
           # воркер (-d), а не всех сразу; timeoutSeconds обязателен: по
           # умолчанию у exec-пробы всего 1 секунда.
@@ -52,9 +58,14 @@ spec:
             failureThreshold: 3
           securityContext:
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
           resources:
             requests: {memory: 256Mi, cpu: 200m}
             limits: {memory: 512Mi, cpu: 1000m}
       volumes:
         - name: certificates
           emptyDir: {}
+        - name: tmp
+          emptyDir: {sizeLimit: 64Mi}

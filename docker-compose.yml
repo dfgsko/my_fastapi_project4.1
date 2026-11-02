@@ -20,6 +20,10 @@ x-app-env: &app-env
   S3_SECRET_KEY: app-admin-secret-change-me
   S3_READ_ACCESS_KEY: app-reader-key
   S3_READ_SECRET_KEY: app-reader-secret-change-me
+  # Безопасность (лаб. № 5): учебные значения. В Kubernetes их даёт Vault.
+  SECRET_KEY: compose-dev-secret-key-change-me-0123456789abcdef
+  ADMIN_BOOTSTRAP_USERNAME: admin
+  ADMIN_BOOTSTRAP_PASSWORD: ChangeMe-Admin-2026
 
 services:
   db:

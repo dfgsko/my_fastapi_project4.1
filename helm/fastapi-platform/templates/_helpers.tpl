@@ -17,3 +17,11 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version }}
 {{- define "fastapi-platform.rabbitHost" -}}
 {{- default (printf "%s-rabbitmq" .Release.Name) .Values.global.rabbitmq.host -}}
 {{- end }}
+
+{{/* Селекторы БД для NetworkPolicy: StatefulSet (app: postgres) и CloudNativePG. */}}
+{{- define "np.dbSelectors" }}
+- podSelector:
+    matchLabels: {app: postgres}
+- podSelector:
+    matchLabels: {cnpg.io/cluster: postgres-cluster}
+{{- end }}

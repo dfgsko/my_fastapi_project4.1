@@ -33,3 +33,6 @@ helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version }}
 {{- define "fastapi-api.configName" -}}
 {{- printf "%s-config" .Release.Name -}}
 {{- end }}
+{{- define "fastapi-api.bootstrapSecret" -}}
+{{- default (printf "%s-bootstrap" .Release.Name) .Values.global.bootstrap.existingSecret -}}
+{{- end }}

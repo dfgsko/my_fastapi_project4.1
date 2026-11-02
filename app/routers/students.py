@@ -12,6 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth import TokenData, get_current_user, require_admin
 from app.database import get_db
 from app.db_models.student import Student as StudentORM
 from app.models.student import Student, StudentCreate
@@ -19,7 +20,12 @@ from app.models.student import Student, StudentCreate
 router = APIRouter(prefix="/students", tags=["students"])
 
 
-@router.get("", response_model=List[Student], summary="Получить список студентов")
+@router.get(
+    "",
+    response_model=List[Student],
+    summary="Получить список студентов (admin)",
+    dependencies=[Depends(require_admin)],
+)
 async def list_students(session: AsyncSession = Depends(get_db)) -> List[Student]:
     result = await session.execute(select(StudentORM).order_by(StudentORM.id))
     return result.scalars().all()
@@ -28,12 +34,18 @@ async def list_students(session: AsyncSession = Depends(get_db)) -> List[Student
 @router.get(
     "/{student_id}",
     response_model=Student,
-    summary="Получить студента по ID",
+    summary="Получить студента по ID (admin или владелец)",
     responses={status.HTTP_404_NOT_FOUND: {"description": "Студент не найден"}},
 )
 async def get_student(
-    student_id: int, session: AsyncSession = Depends(get_db)
+    student_id: int,
+    session: AsyncSession = Depends(get_db),
+    current_user: TokenData = Depends(get_current_user),
 ) -> Student:
+    # BOLA (OWASP API1): обычный пользователь видит только СВОЮ карточку.
+    # 403 одинаков для чужого и несуществующего id — перебор ID ничего не раскрывает.
+    if not current_user.is_admin and current_user.student_id != student_id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Нет доступа к этому студенту")
     student = await session.get(StudentORM, student_id)
     if student is None:
         raise HTTPException(
@@ -47,7 +59,8 @@ async def get_student(
     "",
     response_model=Student,
     status_code=status.HTTP_201_CREATED,
-    summary="Зарегистрировать нового студента",
+    summary="Создать студента (admin; пользователи регистрируются через /auth/register)",
+    dependencies=[Depends(require_admin)],
     responses={
         status.HTTP_400_BAD_REQUEST: {"description": "Email уже используется"}
     },

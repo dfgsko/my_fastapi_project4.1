@@ -14,6 +14,15 @@ spec:
       labels:
         app: rabbitmq
     spec:
+      automountServiceAccountToken: false
+      # В образе rabbitmq:*-alpine пользователь rabbitmq — uid 100, gid 101.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 100
+        runAsGroup: 101
+        fsGroup: 101
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: rabbitmq
           image: rabbitmq:3.13-management-alpine
@@ -41,9 +50,27 @@ spec:
             initialDelaySeconds: 60
             periodSeconds: 30
             timeoutSeconds: 10
+          # readOnlyRootFilesystem здесь НЕ включён намеренно: образ хранит свои
+          # настройки (в т.ч. 10-defaults.conf) в /etc/rabbitmq/conf.d и пишет
+          # в /var/lib|log/rabbitmq, а подмена этих каталогов emptyDir ломает
+          # доступ гостевого пользователя по сети. Требования restricted
+          # выполнены: non-root, drop ALL, seccomp, без privilege escalation.
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - {name: data, mountPath: /var/lib/rabbitmq}
+            - {name: logs, mountPath: /var/log/rabbitmq}
           resources:
             requests: {memory: 256Mi, cpu: 100m}
             limits: {memory: 512Mi, cpu: 500m}
+      volumes:
+        - name: data
+          emptyDir: {}
+        - name: logs
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service

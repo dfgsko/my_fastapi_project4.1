@@ -1,0 +1,48 @@
+# cert-manager: выпуск и продление TLS-сертификатов для Ingress (лаб. № 5).
+#
+#   helm repo add jetstack https://charts.jetstack.io --force-update
+#   helm install cert-manager jetstack/cert-manager -n cert-manager --create-namespace \
+#     --set crds.enabled=true
+#   kubectl apply -f security/cert-manager-issuers.yaml
+#
+# Minikube / fastapi.local: Let's Encrypt не выдаёт сертификаты на несуществующие
+# домены, поэтому по умолчанию используется selfsigned-issuer (браузер покажет
+# предупреждение — для проверки TLS и редиректа этого достаточно).
+# Реальный домен: замените email, укажите letsencrypt-prod в Ingress
+# (cert-manager.io/cluster-issuer) и убедитесь, что домен указывает на Ingress.
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: selfsigned-issuer
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-staging        # тестовый УЦ: нет жёстких лимитов, сертификат не доверенный
+spec:
+  acme:
+    server: https://acme-staging-v02.api.letsencrypt.org/directory
+    email: YOUR_EMAIL@example.com
+    privateKeySecretRef:
+      name: letsencrypt-staging-account-key
+    solvers:
+      - http01:
+          ingress:
+            ingressClassName: nginx
+---
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-prod           # боевой УЦ: лимиты на выпуск, начинайте со staging
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    email: YOUR_EMAIL@example.com
+    privateKeySecretRef:
+      name: letsencrypt-prod-account-key
+    solvers:
+      - http01:
+          ingress:
+            ingressClassName: nginx

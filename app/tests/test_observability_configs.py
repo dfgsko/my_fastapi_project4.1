@@ -38,7 +38,11 @@ def test_yaml_parses(path):
 
 def test_dashboards_exist_and_are_valid_json():
     files = _dashboards()
-    assert {f.name for f in files} >= {"fastapi-dashboard.json", "celery-dashboard.json"}
+    assert {f.name for f in files} >= {
+        "fastapi-dashboard.json",
+        "celery-dashboard.json",
+        "security-dashboard.json",
+    }
     for f in files:
         dash = json.loads(f.read_text(encoding="utf-8"))
         assert dash["uid"] and dash["panels"]
@@ -75,10 +79,16 @@ def test_alert_rules_are_valid_promql():
 
 def test_alerts_and_dashboards_use_exported_metrics():
     """Метрики приложения из запросов должны экспортироваться кодом app/."""
-    source = "\n".join(p.read_text("utf-8") for p in (ROOT / "app").rglob("*.py")
-                       if "tests" not in p.parts)
-    app_metrics = ["celery_queue_length", "files_operations_total", "files_bytes_total",
-                   "http_requests_in_progress"]
+    source = "\n".join(
+        p.read_text("utf-8") for p in (ROOT / "app").rglob("*.py") if "tests" not in p.parts
+    )
+    app_metrics = [
+        "celery_queue_length",
+        "files_operations_total",
+        "files_bytes_total",
+        "http_requests_in_progress",
+        "auth_events_total",
+    ]
     for metric in app_metrics:
         assert metric in source, f"{metric} не экспортируется приложением"
     exprs = [e for _, _, e in _dashboard_exprs()] + [r["expr"] for r in _alert_rules()]
@@ -88,16 +98,21 @@ def test_alerts_and_dashboards_use_exported_metrics():
 
 def test_s3_keys_match_between_app_secret_and_server_identities():
     text = (ROOT / "k8s" / "02-secrets.yaml").read_text("utf-8")
-    secrets = [d for d in yaml.safe_load_all(text)
-               if d and d["metadata"]["name"] == "app-s3-secrets"][0]["stringData"]
+    secrets = [
+        d for d in yaml.safe_load_all(text) if d and d["metadata"]["name"] == "app-s3-secrets"
+    ][0]["stringData"]
     server = _load("k8s/seaweedfs/s3-credentials.yaml")
     identities = {i["name"]: i for i in json.loads(server["stringData"]["s3.json"])["identities"]}
     admin = identities["admin"]["credentials"][0]
     reader = identities["reader"]["credentials"][0]
     assert (admin["accessKey"], admin["secretKey"]) == (
-        secrets["S3_ACCESS_KEY"], secrets["S3_SECRET_KEY"])
+        secrets["S3_ACCESS_KEY"],
+        secrets["S3_SECRET_KEY"],
+    )
     assert (reader["accessKey"], reader["secretKey"]) == (
-        secrets["S3_READ_ACCESS_KEY"], secrets["S3_READ_SECRET_KEY"])
+        secrets["S3_READ_ACCESS_KEY"],
+        secrets["S3_READ_SECRET_KEY"],
+    )
     # Принцип наименьших привилегий: reader не может писать.
     assert set(identities["reader"]["actions"]) == {"Read", "List"}
 

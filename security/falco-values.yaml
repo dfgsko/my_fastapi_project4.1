@@ -1,0 +1,58 @@
+# Falco: обнаружение аномалий в рантайме (лаб. № 5).
+#
+#   helm repo add falcosecurity https://falcosecurity.github.io/charts && helm repo update
+#   helm install falco falcosecurity/falco -n falco --create-namespace -f security/falco-values.yaml
+#   kubectl logs -n falco -l app.kubernetes.io/name=falco -f
+#
+# Драйвер: в методичке указан legacy `ebpf` (kernel module/probe), но он
+# требует заголовков ядра и объявлен устаревшим; `modern_ebpf` встроен в
+# бинарник и работает на ядрах ≥ 5.8 с BTF (стандартные образы Minikube/Docker
+# Desktop). Если ядро старее — поставьте `driver.kind=kmod` (нужны kernel headers).
+driver:
+  kind: modern_ebpf
+
+# Логи Falco — в stdout в JSON: Alloy забирает их в Loki (namespace falco), и
+# события безопасности видны в Grafana (дашборд «Безопасность»).
+tty: true
+falco:
+  json_output: true
+  json_include_output_property: true
+  stdout_output:
+    enabled: true
+
+collectors:
+  kubernetes:
+    enabled: true     # метки k8s.ns.name / k8s.pod.name в событиях
+
+resources:
+  requests: {cpu: 100m, memory: 256Mi}
+  limits: {cpu: 500m, memory: 512Mi}
+
+# Правила приложения. Используют макросы стандартного набора Falco
+# (spawned_process, container, shell_procs, open_read).
+customRules:
+  fastapi-rules.yaml: |-
+    - rule: Shell spawned in fastapi-app container
+      desc: >
+        Интерактивная оболочка в поде приложения: у нас образы без shell-доступа
+        по умолчанию, kubectl exec — повод для расследования.
+      condition: >
+        spawned_process and container and shell_procs
+        and k8s.ns.name = "fastapi-app"
+      output: >
+        Shell в fastapi-app (user=%user.name pod=%k8s.pod.name
+        container=%container.name cmd=%proc.cmdline)
+      priority: WARNING
+      tags: [container, shell, fastapi, mitre_execution]
+
+    - rule: Service account token read in fastapi-app
+      desc: >
+        Чтение токена service account внутри пода приложения. У подов
+        automountServiceAccountToken: false, поэтому токена там быть не должно.
+      condition: >
+        open_read and container and k8s.ns.name = "fastapi-app"
+        and fd.name startswith /var/run/secrets/kubernetes.io
+      output: >
+        Чтение токена SA (pod=%k8s.pod.name file=%fd.name cmd=%proc.cmdline)
+      priority: WARNING
+      tags: [container, credentials, fastapi]

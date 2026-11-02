@@ -193,8 +193,49 @@ def celery():
     return dashboard("celery-workers", "Celery — очередь, воркеры, KEDA + логи", p, ["celery", "keda", "lab4"])
 
 
+def security():
+    global _id
+    _id = 0
+    p = [row("Аутентификация и авторизация", 0)]
+    p += [
+        stat("Успешных входов/с", 'sum(rate(auth_events_total{event="login_success"}[5m]))', 0, 1, unit="ops"),
+        stat("Неудачных входов/с", 'sum(rate(auth_events_total{event="login_failure"}[5m]))', 4, 1, unit="ops",
+             thresholds=[{"color": "green", "value": None}, {"color": "orange", "value": 0.1},
+                         {"color": "red", "value": 0.5}], desc="Порог алерта AuthBruteForce — 0.5/с"),
+        stat("429 (rate limit)/с", 'sum(rate(http_requests_total{status="429"}[5m]))', 8, 1, unit="reqps"),
+        stat("401/403 за 5 мин, /с", 'sum(rate(http_requests_total{status=~"401|403"}[5m]))', 12, 1, unit="reqps"),
+        stat("Reuse refresh за час", 'sum(increase(auth_events_total{event="refresh_reuse"}[1h]))', 16, 1,
+             thresholds=[{"color": "green", "value": None}, {"color": "red", "value": 1}],
+             desc="Повторное предъявление отозванного токена — возможная кража"),
+        stat("Событий Falco за 5 мин", 'sum(count_over_time({namespace="falco"}[5m]))', 20, 1),
+    ]
+    p[-1]["datasource"] = LOKI
+    p[-1]["targets"] = [target('sum(count_over_time({namespace="falco"}[5m]))', ds=LOKI)]
+    p += [
+        timeseries("События аутентификации",
+                   [target('sum by (event) (rate(auth_events_total[5m]))', "{{event}}")],
+                   0, 5, unit="ops", stack=True),
+        timeseries("Отказы по авторизации: 401 / 403 / 429",
+                   [target('sum by (status) (rate(http_requests_total{status=~"401|403|429"}[5m]))', "{{status}}")],
+                   12, 5, unit="reqps", stack=True),
+        timeseries("Отказы по эндпоинтам (401/403)",
+                   [target('sum by (handler, status) (rate(http_requests_total{status=~"401|403"}[5m]))', "{{handler}} {{status}}")],
+                   0, 13, unit="reqps"),
+        timeseries("Входы: успех против ошибок",
+                   [target('sum(rate(auth_events_total{event="login_success"}[5m]))', "успех", "A"),
+                    target('sum(rate(auth_events_total{event="login_failure"}[5m]))', "ошибка", "B")],
+                   12, 13, unit="ops"),
+    ]
+    p += [row("События безопасности (Falco, Loki)", 21)]
+    p += [
+        logs("Falco: предупреждения и выше", '{namespace="falco"} |~ "(?i)warning|error|critical|alert|emergency"', 0, 22),
+        logs("Неудачные входы (логи API)", '{namespace=~"fastapi-.*", app="fastapi"} |= "Неудачный вход"', 0, 31),
+    ]
+    return dashboard("security-overview", "Безопасность — аутентификация, отказы, Falco", p, ["security", "lab5"])
+
+
 if __name__ == "__main__":
     OUT.mkdir(parents=True, exist_ok=True)
-    for name, d in (("fastapi-dashboard.json", fastapi()), ("celery-dashboard.json", celery())):
+    for name, d in (("fastapi-dashboard.json", fastapi()), ("celery-dashboard.json", celery()), ("security-dashboard.json", security())):
         (OUT / name).write_text(json.dumps(d, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         print("written", OUT / name)

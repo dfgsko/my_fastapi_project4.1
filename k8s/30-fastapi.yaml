@@ -18,9 +18,15 @@ spec:
       labels:
         app: fastapi
     spec:
+      serviceAccountName: fastapi-sa     # SA для Vault Secrets Operator (k8s/vault/vault-auth.yaml)
+      automountServiceAccountToken: false  # API не обращается к Kubernetes API — токен не нужен
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 2000
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: api
           image: fastapi-app:latest     # для реестра: ghcr.io/<user>/fastapi-app:<tag>
@@ -33,6 +39,8 @@ spec:
             # S3 (SeaweedFS): endpoint/бакет и ключи доступа — лаб. № 4.
             - configMapRef: {name: s3-config}
             - secretRef: {name: app-s3-secrets}
+            # Лаб. № 5: bootstrap-администратор (логин/пароль первого admin).
+            - secretRef: {name: app-bootstrap-secrets}
           # Приложение стартует ~5 с, поэтому liveness начинается с запасом (10 с):
           # преждевременная liveness-проба убила бы под во время запуска.
           livenessProbe:
@@ -47,9 +55,17 @@ spec:
             periodSeconds: 10
           securityContext:
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true   # писать можно только в смонтированный /tmp
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - {name: tmp, mountPath: /tmp}   # временные файлы загрузок (UploadFile)
           resources:
             requests: {memory: 128Mi, cpu: 100m}
             limits: {memory: 256Mi, cpu: 500m}
+      volumes:
+        - name: tmp
+          emptyDir: {sizeLimit: 64Mi}
 ---
 apiVersion: v1
 kind: Service

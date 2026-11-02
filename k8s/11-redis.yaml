@@ -15,6 +15,14 @@ spec:
       labels:
         app: redis
     spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: redis
           image: redis:7-alpine
@@ -30,9 +38,20 @@ spec:
               command: ["redis-cli", "ping"]
             initialDelaySeconds: 10
             periodSeconds: 20
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          # Рабочий каталог образа — /data (там Redis пишет dump.rdb).
+          volumeMounts:
+            - {name: data, mountPath: /data}
           resources:
             requests: {memory: 64Mi, cpu: 50m}
             limits: {memory: 128Mi, cpu: 250m}
+      volumes:
+        - name: data
+          emptyDir: {sizeLimit: 64Mi}
 ---
 apiVersion: v1
 kind: Service

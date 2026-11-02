@@ -7,8 +7,20 @@ metadata:
     {{- include "fastapi-api.labels" . | nindent 4 }}
   annotations:
     argocd.argoproj.io/sync-wave: "1"
+    {{- if .Values.ingress.tls.enabled }}
+    # cert-manager сам выпустит сертификат и положит его в Secret из spec.tls.
+    cert-manager.io/cluster-issuer: {{ .Values.ingress.tls.clusterIssuer | quote }}
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    {{- end }}
 spec:
   ingressClassName: {{ .Values.ingress.className }}
+  {{- if .Values.ingress.tls.enabled }}
+  tls:
+    - hosts:
+        - {{ .Values.ingress.host | quote }}
+      secretName: {{ default (printf "%s-tls" .Release.Name) .Values.ingress.tls.secretName }}
+  {{- end }}
   rules:
     - host: {{ .Values.ingress.host | quote }}
       http:

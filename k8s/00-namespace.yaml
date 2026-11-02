@@ -4,3 +4,14 @@ metadata:
   name: fastapi-app
   labels:
     app.kubernetes.io/part-of: fastapi-platform
+    # Pod Security Standards (лаб. № 5). enforce: restricted — под, нарушающий
+    # политику (root, лишние capabilities, нет seccomp, hostPath ...), будет
+    # ОТКЛОНЁН при создании. audit/warn пишут нарушения в журнал и в вывод kubectl.
+    # Если какой-то сторонний образ не удаётся запустить без root, временно
+    # понизьте enforce до baseline (см. README, раздел «Решение проблем»).
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/audit-version: latest
+    pod-security.kubernetes.io/warn: restricted
+    pod-security.kubernetes.io/warn-version: latest

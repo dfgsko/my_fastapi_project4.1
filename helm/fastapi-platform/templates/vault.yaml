@@ -1,0 +1,68 @@
+{{- if .Values.vault.enabled }}
+# Vault Secrets Operator: Secret <release>-secrets наполняется из Vault, чарт
+# его НЕ создаёт (templates/secrets.yaml) — иначе helm/Argo и VSO перезаписывали
+# бы значения друг друга. Приложение читает переменные как обычно.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: fastapi-sa
+  labels:
+    {{- include "fastapi-platform.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+---
+apiVersion: secrets.hashicorp.com/v1beta1
+kind: VaultConnection
+metadata:
+  name: vault-connection
+  labels:
+    {{- include "fastapi-platform.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+spec:
+  address: {{ .Values.vault.address | quote }}
+  skipTLSVerify: true        # учебный Vault в dev-режиме работает по HTTP
+  timeout: "10s"
+---
+apiVersion: secrets.hashicorp.com/v1beta1
+kind: VaultAuth
+metadata:
+  name: vault-auth
+  labels:
+    {{- include "fastapi-platform.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+spec:
+  vaultConnectionRef: vault-connection
+  method: kubernetes
+  mount: {{ .Values.vault.authMount }}
+  kubernetes:
+    role: {{ .Values.vault.role }}
+    serviceAccount: fastapi-sa
+    audiences: [vault]
+---
+apiVersion: secrets.hashicorp.com/v1beta1
+kind: VaultStaticSecret
+metadata:
+  name: {{ .Release.Name }}-secrets
+  labels:
+    {{- include "fastapi-platform.labels" . | nindent 4 }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  vaultAuthRef: vault-auth
+  mount: {{ .Values.vault.mount }}
+  type: kv-v2
+  path: {{ .Values.vault.path }}
+  refreshAfter: {{ .Values.vault.refreshAfter }}
+  destination:
+    name: {{ .Release.Name }}-secrets
+    create: true
+    overwrite: true
+  # Pod'ы перечитывают переменные окружения только при старте — перезапускаем.
+  rolloutRestartTargets:
+    - kind: Deployment
+      name: {{ .Release.Name }}-api
+    - kind: Deployment
+      name: {{ .Release.Name }}-worker
+{{- end }}

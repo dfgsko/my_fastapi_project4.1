@@ -19,6 +19,9 @@ configMapGenerator:
   - name: dashboard-celery
     files:
       - celery-dashboard.json=grafana-dashboards/celery-dashboard.json
+  - name: dashboard-security
+    files:
+      - security-dashboard.json=grafana-dashboards/security-dashboard.json
 generatorOptions:
   disableNameSuffixHash: true     # стабильные имена: обновление ConfigMap без перезапуска
   labels:

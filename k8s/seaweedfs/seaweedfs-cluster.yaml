@@ -25,6 +25,20 @@ spec:
 
   master:
     replicas: 1                    # в production — 3 (кворум raft)
+    # Лаб. № 5: PSS restricted. Официальный чарт SeaweedFS допускает запуск
+    # без root (runAsUser 1000, drop ALL, seccomp); readOnlyRootFilesystem не
+    # включаем — каталоги, которые создаёт оператор, не проверены на запись.
+    podSecurityContext:
+      runAsNonRoot: true
+      runAsUser: 1000
+      runAsGroup: 1000
+      fsGroup: 1000
+      seccompProfile:
+        type: RuntimeDefault
+    containerSecurityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop: [ALL]
     volumeSizeLimitMB: 1024        # максимальный размер ОДНОГО файла-тома
     # master.persistence (PVC под raft-журнал) в учебном кластере не включаем:
     # один master, а ID томов восстанавливаются из heartbeat volume-серверов.
@@ -33,6 +47,20 @@ spec:
 
   volume:
     replicas: 1                    # сами данные; в production — ≥ 3 + репликация
+    # Лаб. № 5: PSS restricted. Официальный чарт SeaweedFS допускает запуск
+    # без root (runAsUser 1000, drop ALL, seccomp); readOnlyRootFilesystem не
+    # включаем — каталоги, которые создаёт оператор, не проверены на запись.
+    podSecurityContext:
+      runAsNonRoot: true
+      runAsUser: 1000
+      runAsGroup: 1000
+      fsGroup: 1000
+      seccompProfile:
+        type: RuntimeDefault
+    containerSecurityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop: [ALL]
     requests:
       storage: 10Gi                # размер PVC volume-сервера
       cpu: 100m
@@ -41,6 +69,20 @@ spec:
 
   filer:
     replicas: 1
+    # Лаб. № 5: PSS restricted. Официальный чарт SeaweedFS допускает запуск
+    # без root (runAsUser 1000, drop ALL, seccomp); readOnlyRootFilesystem не
+    # включаем — каталоги, которые создаёт оператор, не проверены на запись.
+    podSecurityContext:
+      runAsNonRoot: true
+      runAsUser: 1000
+      runAsGroup: 1000
+      fsGroup: 1000
+      seccompProfile:
+        type: RuntimeDefault
+    containerSecurityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop: [ALL]
     # Метаданные (дерево каталогов и объектов) — leveldb2 на PVC.
     # Для HA их выносят во внешнюю БД (PostgreSQL / Redis).
     config: |
@@ -59,6 +101,20 @@ spec:
   # Stateless S3-шлюз (масштабируется независимо). IAM встроен, порт 8333.
   s3:
     replicas: 1
+    # Лаб. № 5: PSS restricted. Официальный чарт SeaweedFS допускает запуск
+    # без root (runAsUser 1000, drop ALL, seccomp); readOnlyRootFilesystem не
+    # включаем — каталоги, которые создаёт оператор, не проверены на запись.
+    podSecurityContext:
+      runAsNonRoot: true
+      runAsUser: 1000
+      runAsGroup: 1000
+      fsGroup: 1000
+      seccompProfile:
+        type: RuntimeDefault
+    containerSecurityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop: [ALL]
     configSecret:
       name: seaweedfs-s3-config
       key: s3.json

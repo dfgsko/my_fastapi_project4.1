@@ -4,6 +4,8 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 
 class StudentBase(BaseModel):
+    model_config = ConfigDict(extra="forbid")  # Mass Assignment: лишние поля → 422
+
     full_name: str = Field(
         ...,
         min_length=1,

@@ -104,3 +104,92 @@ def metrics_enabled() -> bool:
 def queue_metrics_enabled() -> bool:
     """Публиковать ли длину очереди Celery (celery_queue_length) на /metrics."""
     return _env("CELERY_QUEUE_METRICS", "true").lower() == "true"
+
+
+# ---------------------------------------------------------------------------
+# Безопасность (лабораторная № 5)
+# ---------------------------------------------------------------------------
+
+_DEV_SECRET = "dev-secret-change-me"
+_PROD_ENVS = {"production", "prod", "staging"}
+
+
+def environment() -> str:
+    return _env("ENVIRONMENT", "development").lower()
+
+
+def get_secret_key() -> str:
+    """
+    Ключ подписи JWT. В Kubernetes приходит из Secret app-secrets, который
+    заполняет Vault (VaultStaticSecret). Dev-значение допустимо только для
+    разработки: в production/staging слабый ключ — это Broken Authentication
+    (OWASP API2), поэтому приложение отказывается стартовать.
+    """
+    key = _env("SECRET_KEY", _DEV_SECRET)
+    if environment() in _PROD_ENVS and (key == _DEV_SECRET or len(key) < 32):
+        raise RuntimeError(
+            "SECRET_KEY не задан или короче 32 символов — запуск в "
+            f"ENVIRONMENT={environment()} запрещён"
+        )
+    return key
+
+
+def jwt_algorithm() -> str:
+    alg = _env("JWT_ALGORITHM", "HS256")
+    # Только симметричные HMAC-алгоритмы: 'none' и RS*/ES* с ключом из HMAC —
+    # классические приёмы подделки токена.
+    if alg not in ("HS256", "HS384", "HS512"):
+        raise RuntimeError(f"Недопустимый JWT_ALGORITHM: {alg!r}")
+    return alg
+
+
+def access_token_expire_minutes() -> int:
+    return int(_env("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
+
+
+def refresh_token_expire_days() -> int:
+    return int(_env("REFRESH_TOKEN_EXPIRE_DAYS", "7"))
+
+
+def bcrypt_rounds() -> int:
+    return int(_env("BCRYPT_ROUNDS", "12"))
+
+
+def password_min_length() -> int:
+    return int(_env("PASSWORD_MIN_LENGTH", "10"))
+
+
+def auth_rate_limit() -> tuple[int, int]:
+    """(число попыток, окно в секундах) для /auth/token: защита от брутфорса."""
+    return int(_env("AUTH_RATE_LIMIT_MAX", "10")), int(_env("AUTH_RATE_LIMIT_WINDOW", "60"))
+
+
+def admin_bootstrap() -> tuple[str, str]:
+    return _env("ADMIN_BOOTSTRAP_USERNAME"), _env("ADMIN_BOOTSTRAP_PASSWORD")
+
+
+def cors_origins() -> list[str]:
+    return [o.strip() for o in _env("CORS_ORIGINS").split(",") if o.strip()]
+
+
+def trusted_hosts() -> list[str]:
+    hosts = [h.strip().lower() for h in _env("TRUSTED_HOSTS", "*").split(",") if h.strip()]
+    return hosts or ["*"]
+
+
+def secure_headers_enabled() -> bool:
+    return _env("SECURE_HEADERS_ENABLED", "true").lower() == "true"
+
+
+def metrics_block_proxied() -> bool:
+    """Не отдавать /metrics запросам, пришедшим через Ingress (есть X-Forwarded-For)."""
+    return _env("METRICS_BLOCK_PROXIED", "true").lower() == "true"
+
+
+def registration_enabled() -> bool:
+    return _env("REGISTRATION_ENABLED", "true").lower() == "true"
+
+
+def docs_enabled() -> bool:
+    """Swagger/OpenAPI в production лучше скрывать (OWASP API9: инвентаризация)."""
+    return _env("DOCS_ENABLED", "true").lower() == "true"

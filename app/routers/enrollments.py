@@ -19,6 +19,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth import TokenData, get_current_user, require_admin
 from app.database import get_db
 from app.db_models.course import Course as CourseORM
 from app.db_models.enrollment import Enrollment as EnrollmentORM
@@ -46,8 +47,13 @@ ENROLL_RATE_LIMIT_WINDOW_SECONDS = 60
     },
 )
 async def enroll_student(
-    payload: EnrollmentCreate, session: AsyncSession = Depends(get_db)
+    payload: EnrollmentCreate,
+    session: AsyncSession = Depends(get_db),
+    current_user: TokenData = Depends(get_current_user),
 ) -> Enrollment:
+    # BOLA: записать на курс можно только себя (админ — любого студента).
+    if not current_user.is_admin and payload.student_id != current_user.student_id:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Можно записывать только себя")
     # Rate limiting: не более 5 запросов на запись в минуту для одного студента.
     await rate_limit_check(
         key=f"rate_limit:enroll:{payload.student_id}",
@@ -98,7 +104,15 @@ async def list_enrollments(
     student_id: Optional[int] = Query(default=None, description="Фильтр по студенту"),
     course_id: Optional[int] = Query(default=None, description="Фильтр по курсу"),
     session: AsyncSession = Depends(get_db),
+    current_user: TokenData = Depends(get_current_user),
 ) -> List[Enrollment]:
+    if not current_user.is_admin:
+        # BOLA: пользователь видит только свои записи; чужой student_id — 403.
+        if student_id is not None and student_id != current_user.student_id:
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "Нет доступа к записям другого студента")
+        if current_user.student_id is None:
+            return []
+        student_id = current_user.student_id
     stmt = select(EnrollmentORM)
     if student_id is not None:
         stmt = stmt.where(EnrollmentORM.student_id == student_id)
@@ -113,7 +127,8 @@ async def list_enrollments(
 @router.patch(
     "/{enrollment_id}/complete",
     response_model=Enrollment,
-    summary="Отметить курс завершённым и выставить оценку",
+    summary="Отметить курс завершённым и выставить оценку (admin)",
+    dependencies=[Depends(require_admin)],
     description="Помечает запись как завершённую и запускает фоновую "
     "Celery-задачу генерации PDF-сертификата.",
     responses={

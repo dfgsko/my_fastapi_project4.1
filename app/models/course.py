@@ -12,6 +12,8 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class CourseBase(BaseModel):
+    model_config = ConfigDict(extra="forbid")  # Mass Assignment: лишние поля → 422
+
     title: str = Field(
         ...,
         min_length=1,
@@ -54,6 +56,8 @@ class CourseUpdate(BaseModel):
     Все поля обязательны — эндпоинт реализует полную замену ресурса
     (semantics PUT).
     """
+    model_config = ConfigDict(extra="forbid")  # Mass Assignment: лишние поля → 422
+
     title: str = Field(..., min_length=1, max_length=200)
     description: str = Field(..., min_length=1, max_length=2000)
     instructor: str = Field(..., min_length=1, max_length=200)

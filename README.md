@@ -1,12 +1,13 @@
 # Educational Platform API — Курсы, студенты и зачисления
 
-Вариант 8 («Курсы и студенты»). Проект прошёл четыре лабораторные работы:
+Вариант 8 («Курсы и студенты»). Проект прошёл пять лабораторных работ:
 
 | Лаб. | Что сделано | Где описано |
 |------|-------------|-------------|
 | №1–2 | REST API на FastAPI, SQLAlchemy, кэш и rate limiting в Redis, Celery-задача генерации сертификатов, админ-панель | [docs/LAB1-2.md](docs/LAB1-2.md) (эндпоинты, модель данных, примеры запросов) |
 | №3 | PostgreSQL, RabbitMQ, Kubernetes (Minikube), Helm umbrella-чарт, KEDA, CloudNativePG, Argo CD, Image Updater, GitHub Actions | разделы «Kubernetes» … «CI» ниже |
-| **№4** | **Наблюдаемость и S3: Prometheus, Grafana, Alertmanager, Loki, Alloy, Flower, SeaweedFS (S3 API)** | раздел «Лабораторная № 4» ниже |
+| №4 | Наблюдаемость и S3: Prometheus, Grafana, Alertmanager, Loki, Alloy, Flower, SeaweedFS (S3 API) | раздел «Лабораторная № 4» ниже |
+| **№5** | **Безопасность: JWT и роли, защита от BOLA, Vault, NetworkPolicy, Pod Security, TLS (cert-manager), Kyverno, Falco, Trivy** | раздел «Лабораторная № 5» ниже |
 
 ## Архитектура
 
@@ -66,7 +67,8 @@
 
 ```bash
 pip install -r requirements-dev.txt
-pytest -v          # 42 теста: SQLite in-memory, fake Redis, Celery в eager-режиме
+pytest -v          # ~280 тестов: SQLite in-memory, fake Redis, Celery в eager-режиме
+# С лаб. № 5 API требует JWT — примеры curl с токеном см. «Лабораторная № 5»
 ```
 
 ### 2. Docker Compose (контрольная точка перед Kubernetes)
@@ -433,6 +435,210 @@ aws --endpoint-url http://localhost:8333 s3 ls s3://fastapi-files        # (AWS_
 | `celery_queue_length` отсутствует | API не достаёт RabbitMQ или очередь `celery` ещё не создана (воркер не запускался) |
 | Pod Prometheus/Loki `Pending` | не хватает ресурсов Minikube: `minikube start --cpus=4 --memory=8192` |
 
+## Лабораторная № 5: безопасность и защита данных
+
+> **С этой работы API закрыт авторизацией.** Примеры `curl` из разделов выше выполняйте с заголовком
+> `Authorization: Bearer $TOKEN` (получение токена — ниже). `/`, `/health`, `/ready` остаются открытыми
+> (пробы Kubernetes), `/metrics` доступен только из кластера.
+
+Что добавлено:
+
+| Область | Файлы |
+|---------|-------|
+| Аутентификация и роли | `app/auth.py`, `app/routers/auth.py`, `app/routers/users.py`, `app/db_models/user.py`, миграция `0002_users_auth.py`, `app/bootstrap.py` |
+| Защита HTTP | `app/security.py` (заголовки, Host, CORS, закрытие `/metrics` от Ingress), `extra="forbid"` во входных моделях |
+| Pod Security, securityContext | `k8s/00-namespace.yaml` (PSS `restricted`), все манифесты `k8s/*.yaml`, Helm-шаблоны |
+| Сетевая изоляция | `k8s/network-policies/network-policies.yaml` (генерируется из `helm/.../templates/networkpolicies.yaml`) |
+| Секреты | `k8s/vault/`, `security/vault-values.yaml`, `scripts/vault-setup.sh`, `helm/.../templates/vault.yaml` |
+| TLS | `k8s/ingress/ingress.yaml`, `security/cert-manager-issuers.yaml` |
+| Политики и рантайм | `security/kyverno-policies.yaml`, `security/falco-values.yaml` |
+| Наблюдаемость безопасности | дашборд `security-dashboard.json`, алерты `AuthBruteForce`, `RefreshTokenReuse`, `UnauthorizedRequestsSpike` |
+| CI | `security-scan` (Trivy), сканирование образов до push, все actions закреплены по SHA коммита |
+| GitOps | `argocd/security-apps.yaml`, PSS-метки через `managedNamespaceMetadata` |
+
+### Угрозы и меры (OWASP API Top 10)
+
+| Угроза | Как закрыта |
+|--------|-------------|
+| API1 BOLA (доступ к чужим объектам) | студент видит только свою карточку, записи и файлы; одинаковый `403` для чужого и несуществующего id (перебор ID бесполезен); сертификат доступен только владельцу записи |
+| API2 Broken Authentication | bcrypt, политика паролей, ограничение попыток входа (по логину и по IP), одинаковые ответы и время для «нет пользователя»/«неверный пароль», короткий access (30 мин), refresh с ротацией и отзывом, обязательные `exp`/`sub`/`type`, запрет `alg=none`, слабый `SECRET_KEY` в production = отказ запуска |
+| API3 Mass Assignment | входные модели с `extra="forbid"` (`{"role":"admin"}` → 422); регистрация всегда создаёт роль `user`; админ меняет только `role` и `is_active` |
+| API4 Ресурсы | лимиты: попытки входа, запись на курс, размер загрузки (10 МБ), лимит тела на Ingress, quota бакета |
+| API5 BFLA (функции без прав) | создание/изменение курсов, список студентов, оценки, `/admin`, `/users` — только `admin` (зависимость `require_admin`) |
+| API8 Security Misconfiguration | заголовки безопасности, проверка `Host`, CORS по белому списку, `/metrics` не отдаётся через Ingress, XSS в `/admin` исправлен (`html.escape`) |
+| API9 Инвентаризация | `DOCS_ENABLED=false` скрывает Swagger в production |
+| Секреты | Vault + VSO; в Git нет паролей приложения; Trivy ищет секреты в репозитории |
+| Цепочка поставок | actions закреплены по SHA, Trivy блокирует CRITICAL/HIGH в образах и зависимостях |
+
+### Аутентификация и роли
+
+```bash
+kubectl port-forward svc/fastapi-service 8000:80 -n fastapi-app
+# Регистрация (создаёт студента и пользователя с ролью user)
+curl -X POST localhost:8000/auth/register -H 'Content-Type: application/json' \
+  -d '{"username":"anna_s","password":"Str0ng-passw0rd","full_name":"Смирнова Анна","email":"anna@example.com"}'
+# Вход → access + refresh
+curl -X POST localhost:8000/auth/token -d 'username=anna_s&password=Str0ng-passw0rd'
+TOKEN=<access_token>
+curl localhost:8000/auth/me -H "Authorization: Bearer $TOKEN"
+# Первый администратор создаётся из ADMIN_BOOTSTRAP_USERNAME/PASSWORD (k8s/02-secrets.yaml)
+curl -X POST localhost:8000/auth/token -d 'username=admin&password=ChangeMe-Admin-2026'
+```
+
+| Эндпоинт | Доступ |
+|----------|--------|
+| `POST /auth/register`, `/auth/token`, `/auth/refresh`, `/auth/logout` | открыты (с лимитами) |
+| `GET /auth/me`, `POST /auth/change-password` | любой пользователь |
+| `GET /courses`, `GET /courses/{id}` | любой пользователь |
+| `POST/PUT/DELETE /courses…`, `GET/POST /students`, `PATCH /enrollments/{id}/complete`, `/admin/*`, `/users/*` | только `admin` |
+| `GET /students/{id}` | админ или владелец |
+| `POST /enrollments` | себя (админ — любого) |
+| `GET /enrollments` | свои записи (админ — все) |
+| `POST /files/upload` | любой; файл обычного пользователя попадает в `users/<id>/…` |
+| `GET /files…`, `…/download`, `…/url`, `DELETE` | админ — всё; пользователь — свой каталог и свои сертификаты |
+
+Refresh-токены хранятся в БД (по `jti`): `logout` и смена пароля отзывают их; повторное предъявление уже использованного
+токена считается кражей — отзываются все токены пользователя. Токен передаётся только в теле запроса
+(не в URL, который попадает в логи).
+
+> **Отличия от методички.** `PyJWT` + `bcrypt` вместо `python-jose` + `passlib`: python-jose слабо поддерживается
+> и имел CVE, passlib несовместим с bcrypt ≥ 4.1. Роль и `is_active` берутся из БД на каждый запрос, поэтому блокировка
+> и смена роли действуют сразу, а не через 30 минут.
+
+### Порядок развёртывания (Minikube)
+
+```bash
+# NetworkPolicy работают только при CNI с их поддержкой — стандартный Minikube их НЕ применяет:
+minikube start --cpus=4 --memory=8192 --disk-size=40g --cni=calico
+minikube addons enable ingress
+
+./scripts/deploy-security.sh      # cert-manager, Kyverno, Vault + VSO (+настройка), Falco, политики
+# затем приложение (как в лаб. № 3–4), без app-secrets — его создаст Vault:
+kubectl apply -f k8s/00-namespace.yaml                 # PSS: restricted
+kubectl apply -f k8s/vault/                            # SA, VaultAuth, VaultStaticSecret → Secret app-secrets
+kubectl get secret app-secrets -n fastapi-app          # появился (создал VSO)
+kubectl apply -f k8s/                                  # конфиги, БД, брокер, API, воркер
+kubectl apply -f k8s/ingress/ingress.yaml
+kubectl apply -f k8s/network-policies/network-policies.yaml   # в самом конце
+```
+
+Без Vault: `kubectl apply -f k8s/local/app-secrets.yaml` вместо `k8s/vault/`. Helm: `vault.enabled=true`
+для staging/prod уже включён в `environments/*`; для dev — `--set vault.enabled=true` или значения по умолчанию
+(`global.jwt.secretKey` пуст → учебный ключ). Один скрипт без Argo CD: `scripts/deploy-observability.sh`
+(лаб. № 4) + `scripts/deploy-security.sh`.
+
+### Pod Security Standards и securityContext
+
+Namespace `fastapi-app` помечен `pod-security.kubernetes.io/enforce: restricted`: под, нарушающий профиль, **не создаётся**.
+Поэтому все workloads соответствуют ему:
+
+| Workload | Пользователь | readOnlyRootFilesystem | Записываемые каталоги |
+|----------|--------------|------------------------|-----------------------|
+| API, воркер, Job миграций | 1000 | да | `/tmp` (воркер ещё `/app/certificates`) |
+| PostgreSQL (alpine) | 70 | да | PVC, `/var/run/postgresql`, `/tmp` |
+| Redis (alpine) | 999 | да | `/data` (emptyDir) |
+| RabbitMQ (alpine) | 100 / 101 | **нет** (обоснование ниже) | `/var/lib/rabbitmq`, `/var/log/rabbitmq` |
+| Flower | 1000 | да | `/tmp`, `/data` |
+| SeaweedFS (через CR) | 1000 | нет | PVC |
+
+Для всех: `runAsNonRoot`, `capabilities.drop: [ALL]`, `allowPrivilegeEscalation: false`, `seccompProfile: RuntimeDefault`,
+`automountServiceAccountToken: false` (никому из них не нужен доступ к API Kubernetes). RabbitMQ без
+`readOnlyRootFilesystem`: образ хранит `10-defaults.conf` в `/etc/rabbitmq/conf.d` и пишет в свои каталоги, подмена их
+пустым томом ломает сетевой доступ; остальные требования restricted выполнены. UID алпайн-образов указаны явно
+(postgres 70, redis 999, rabbitmq 100). Профиль проверяется автотестом на всех манифестах и на рендере Helm.
+
+```bash
+kubectl get ns fastapi-app --show-labels | tr ',' '\n' | grep pod-security
+# попытка запустить небезопасный под — отказ:
+kubectl run bad --image=nginx -n fastapi-app --privileged     # Error ... violates PodSecurity "restricted"
+```
+
+### NetworkPolicy
+
+`default-deny-all` + разрешения (DNS по UDP и TCP, Ingress → API, Prometheus → API/Flower, API/воркер → БД/Redis/RabbitMQ/S3,
+KEDA → RabbitMQ, SeaweedFS между компонентами и оператором, CloudNativePG, cert-manager-решатель). Политики
+генерируются из Helm-шаблона (`./scripts/gen-network-policies.sh`), CI проверяет отсутствие расхождений.
+Автотест содержит симулятор политик и проверяет 22 нужных и 21 лишний поток.
+
+> **Отличия от методички.** Добавлены то, чего в шаблоне не хватало и что сломало бы приложение: воркер → S3 (кладёт сертификаты),
+> Prometheus → API и Flower (иначе мониторинг лаб. № 4 перестаёт работать), KEDA → RabbitMQ, оператор SeaweedFS, DNS по TCP,
+> доступ CNPG к API-серверу Kubernetes. Метки подов: везде единая `app: <имя>`.
+
+```bash
+# Разрешено: API → PostgreSQL
+kubectl exec -n fastapi-app deploy/fastapi -- python -c "import socket; socket.create_connection(('postgres',5432),3); print('OK')"
+# Запрещено: под из другого namespace → Redis (таймаут)
+kubectl run nettest -n default --rm -it --restart=Never --image=busybox -- nc -zv -w3 redis.fastapi-app 6379
+# Запрещено: воркер → API
+kubectl exec -n fastapi-app deploy/celery-worker -- python -c "import socket; socket.create_connection(('fastapi-service',80),3)"
+```
+
+### Vault и Vault Secrets Operator
+
+Vault в dev-режиме (данные в памяти!) хранит `SECRET_KEY`, пароли БД и брокера (`secret/fastapi/config`, kv-v2).
+VSO логинится в Vault токеном ServiceAccount `fastapi-sa` (метод `kubernetes`), читает секрет и **сам создаёт Secret
+`app-secrets`**, а при изменении перезапускает API и воркеры. `scripts/vault-setup.sh` включает метод `kubernetes`,
+настраивает адрес API-сервера, политику (`read` только на `secret/data/fastapi/*`) и роль (только `fastapi-sa` из `fastapi-app`,
+`audience=vault`) — в методичке этих шагов нет, без них Vault отвечает 403. Bootstrap-пароль администратора остаётся в обычном
+Secret `app-bootstrap-secrets`.
+
+```bash
+kubectl get vaultauth,vaultstaticsecret -n fastapi-app           # статус: Synced / Healthy
+kubectl exec -n vault vault-0 -- env VAULT_TOKEN=root vault kv get secret/fastapi/config
+# Ротация: меняем значение в Vault — через ≤ 30 с Secret обновится, поды перезапустятся
+kubectl exec -n vault vault-0 -- env VAULT_TOKEN=root vault kv patch secret/fastapi/config SECRET_KEY=$(openssl rand -hex 32)
+kubectl rollout status deploy/fastapi -n fastapi-app
+```
+
+Важно: пароль БД в Vault должен совпадать с тем, с которым PostgreSQL был инициализирован (смена пароля в Vault не меняет
+пользователя в уже созданной БД). Для автоматической ротации есть `k8s/vault/optional/vault-dynamic-secret.yaml`
+(динамические учётные данные PostgreSQL с TTL). Смена `SECRET_KEY` разлогинивает всех пользователей — это ожидаемо.
+
+### TLS (cert-manager)
+
+`ClusterIssuer`: `selfsigned-issuer` (Minikube, домен `fastapi.local`) и `letsencrypt-staging` / `letsencrypt-prod` (реальный домен,
+HTTP-01). Ingress с аннотацией `cert-manager.io/cluster-issuer` и блоком `tls` получает сертификат в Secret `fastapi-tls`,
+cert-manager продлевает его сам. Включён редирект на HTTPS, приложение добавляет HSTS за HTTPS-прокси.
+
+```bash
+kubectl get certificate -n fastapi-app                       # READY=True
+curl -k https://fastapi.local/health ; curl -sI http://fastapi.local/ | head -2   # 308 → https
+```
+Let's Encrypt не выдаёт сертификаты на `fastapi.local`: для боевого выпуска нужен публичный домен, указывающий на Ingress,
+и подстановка e-mail в `security/cert-manager-issuers.yaml`.
+
+### Kyverno, Falco, Trivy
+
+* **Kyverno** (`security/kyverno-policies.yaml`): запрет privileged и root — `Enforce`, тег `:latest` — `Audit`
+  (локальные образы Minikube). Политики действуют только в `fastapi-*`, иначе остановили бы системные поды.
+  `failureAction` задан в правиле (поле `validationFailureAction` в ClusterPolicy помечено deprecated).
+  Проверка: `kubectl get clusterpolicy`, `kubectl get policyreport -A`.
+* **Falco** (`security/falco-values.yaml`): драйвер `modern_ebpf` (legacy `ebpf` из методички устарел и требует заголовков ядра),
+  свои правила: shell в контейнере `fastapi-app` и чтение токена service account. События идут в Loki и на дашборд «Безопасность».
+  Проверка: `kubectl exec -it -n fastapi-app deploy/fastapi -- sh`, затем `kubectl logs -n falco -l app.kubernetes.io/name=falco | grep -i shell`.
+* **Trivy** (CI): `security-scan` ищет уязвимости зависимостей и секреты в репозитории (CRITICAL/HIGH блокируют сборку), образы сканируются
+  **до** публикации, мисконфигурации манифестов выводятся отчётом. Все actions закреплены по SHA коммита, а не по тегу:
+  тег можно переписать, SHA — нет. Обновлять SHA нужно осознанно (Dependabot/Renovate).
+
+### Решение проблем
+
+| Симптом | Причина и решение |
+|---------|-------------------|
+| Под не создаётся: `violates PodSecurity "restricted"` | в манифесте нет `runAsNonRoot`/`seccompProfile`/`drop: ALL`; команда `kubectl get events -n fastapi-app`; временно понизить `enforce` до `baseline` |
+| Под в `CrashLoopBackOff`, `permission denied` | образ пишет в каталог, недоступный при `readOnlyRootFilesystem` или не-root; смонтируйте `emptyDir` (см. таблицу PSS) или проверьте `fsGroup`/UID образа |
+| NetworkPolicy «не работают» (всё доступно) | CNI без поддержки политик: пересоздайте Minikube с `--cni=calico` |
+| После политик пропали метрики / не масштабируются воркеры / нет S3 | проверьте потоки: Prometheus → API/Flower, KEDA → RabbitMQ, воркер → `seaweedfs:8333`; `kubectl describe networkpolicy -n fastapi-app` |
+| Под не резолвит имена | DNS должен быть открыт по UDP **и** TCP (политика `allow-dns-egress`) |
+| `VaultAuth` в статусе Error / 403 от Vault | не выполнен `scripts/vault-setup.sh` (метод `kubernetes`, роль) или `audience` роли ≠ `vault` |
+| `Secret app-secrets` не появился | `kubectl describe vaultstaticsecret app-secrets -n fastapi-app`; VSO не установлен; Secret создан вручную (конфликт) |
+| API не стартует: `SECRET_KEY не задан или короче 32` | `ENVIRONMENT=production/staging` требует сильный ключ из Vault/Secret |
+| 401 на все запросы после смены ключа | токены подписаны старым `SECRET_KEY` — войдите заново |
+| 429 при входе | сработал лимит попыток на логин (`AUTH_RATE_LIMIT_MAX`/`WINDOW`), подождите окно |
+| 400 `Invalid host header` | значение `Host` не входит в `TRUSTED_HOSTS` (добавьте хост Ingress) |
+| Сертификат не выпускается (`READY=False`) | `kubectl describe certificate,order,challenge -n fastapi-app`; для `fastapi.local` используйте `selfsigned-issuer`; HTTP-01 решатель должен быть доступен Ingress (политика `allow-acme-solver`) |
+| Kyverno блокирует под | `kubectl describe clusterpolicy`; политика привязана к `fastapi-*`; для отладки `failureAction: Audit` |
+| Falco в `CrashLoopBackOff` | ядро без BTF для `modern_ebpf`: `--set driver.kind=kmod` (нужны kernel headers) |
+
 ## CI (GitHub Actions)
 
 `.github/workflows/ci.yml`: `pytest` → `helm lint` + `helm template` (в т.ч. без SeaweedFS и мониторинга) →
@@ -449,6 +655,7 @@ workflow `.github/workflows/deploy-monitoring.yml` — он нужен толь�
 ├── docker-compose.yml       # db + redis + rabbitmq + SeaweedFS + api + worker (+ flower, prometheus)
 ├── k8s/                     # «сырые» манифесты; cnpg/, keda/, ingress/, seaweedfs/, monitoring/ — отдельно
 ├── monitoring/              # values kube-prometheus-stack / Loki / Alloy, Grafana: datasource, дашборды (лаб. №4)
+├── security/                # Kyverno, Falco, Vault, cert-manager (лаб. №5)
 ├── helm/                    # fastapi-platform (umbrella) и postgres-cluster (CNPG)
 ├── argocd/                  # Application, ApplicationSet (Git dir / Matrix), values Argo CD и Image Updater
 ├── environments/            # dev / staging / prod values для GitOps
@@ -462,13 +669,31 @@ workflow `.github/workflows/deploy-monitoring.yml` — он нужен толь�
 
 **Проверено в среде сборки (без кластера):**
 
-* `pytest` — 133 теста (API, метрики, S3-роутер на имитации клиента, воркер, согласованность конфигов), `flake8`.
+* `pytest` — 280+ тестов (API, аутентификация, роли и BOLA, метрики, S3, воркер, согласованность конфигов), `flake8`.
 * Реальный код `app/s3_client.py` прогнан против S3-совместимого сервера (moto): загрузка, скачивание, список, presigned URL, удаление, 404.
 * Helm 3.10: `helm lint` и `helm template` для dev / staging / prod и с отключёнными `seaweedfs` / `observability`.
 * `kubeconform --strict`: 99 ресурсов (манифесты `k8s/`, `monitoring/`, рендер чартов, включая `ServiceMonitor`) валидны.
 * Ресурсы `Seaweed`, `Bucket`, `BucketLifecyclePolicy` (манифесты и рендер Helm) соответствуют схемам CRD оператора SeaweedFS.
 * `alloy validate` (Alloy v1.20.1) для конфигурации сбора логов; `kustomize build monitoring/`.
 * Все PromQL-запросы дашбордов и алертов разбираются парсером Prometheus; метрики в них действительно экспортируются приложением.
+
+
+**Лаб. № 5 — проверено без кластера:**
+
+* Аутентификация: подделанные токены (`alg=none`, чужой ключ, без `exp`, refresh вместо access, роль в токене), ротация и повторное
+  предъявление refresh, лимит попыток входа, отсутствие различий между «нет пользователя» и «неверный пароль» — автотесты;
+  намеренная порча защиты (`require_admin`, проверка владельца) приводит к падению тестов.
+* Авторизация: каждый эндпоинт без токена даёт 401; роли; BOLA для студентов, записей, файлов и сертификатов; Mass Assignment.
+* Профиль Pod Security `restricted` проверен реализацией проверок на всех манифестах `k8s/` и на рендере Helm (dev/staging/prod);
+  негативный контроль подтверждает, что проверка ловит небезопасные поды.
+* Симулятор NetworkPolicy: 22 нужных потока разрешены, 21 лишний запрещён; DNS по UDP и TCP.
+* Ресурсы Vault Secrets Operator (v1.6.1) и Kyverno (1.19) проверены по схемам CRD; `kubeconform --strict`: 169 ресурсов валидны;
+  `helm template` для dev/staging/prod (prod без секрета — осознанная ошибка рендера).
+* CI: все actions закреплены по SHA (проверяет тест), Trivy блокирует CRITICAL/HIGH.
+
+**Лаб. № 5 — не запускалось** (нет Docker и кластера): реальная работа admission (PSS, Kyverno), применение NetworkPolicy в Calico,
+Vault и VSO, cert-manager, Falco, срабатывание алертов безопасности, запуск образов под не-root (особенно PostgreSQL, Redis, RabbitMQ,
+SeaweedFS и Flower), результаты Trivy на реальных образах. Выполните шаги и приложите скриншоты.
 
 **Не запускалось** (в среде нет Docker и кластера): сборка образов, `docker compose up`, Minikube, оператор SeaweedFS
 и реальное создание бакета, установка kube-prometheus-stack / Loki / Alloy, статус целей Prometheus, отображение
@@ -480,6 +705,7 @@ KEDA, CNPG, Argo CD и Image Updater в среде сборки не запус�
 
 Пароли в `k8s/02-secrets.yaml`, `k8s/seaweedfs/s3-credentials.yaml`, `monitoring/grafana-admin-secret.yaml` и
 `values.yaml` — учебные (ключи S3 `*-change-me`, Grafana `admin/admin`); в production их выносят из Git.
-Приложению выдаются два набора ключей S3: `admin` (загрузка/удаление) и `reader` (скачивание, presigned URL) — принцип наименьших привилегий. Secret в Kubernetes только закодирован base64;
+С лаб. № 5 пароли приложения (`SECRET_KEY`, БД, брокер) хранятся в Vault и в Git не попадают; в репозитории остаются только учебные
+значения (bootstrap-администратор, ключи S3, Grafana). Приложению выдаются два набора ключей S3: `admin` (загрузка/удаление) и `reader` (скачивание, presigned URL) — принцип наименьших привилегий. Secret в Kubernetes только закодирован base64;
 в production — шифрование etcd и Sealed Secrets / External Secrets / Vault (для Helm — `global.existingSecret`).
 Образы запускаются не от root; контейнер PostgreSQL использует штатный entrypoint, который сам понижает привилегии.

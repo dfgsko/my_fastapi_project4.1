@@ -1,0 +1,108 @@
+# Kyverno: admission-политики для namespace fastapi-* (лаб. № 5).
+# Pod Security Standards уже ограничивают поды на уровне namespace; Kyverno
+# добавляет собственные правила и понятные сообщения об отказе.
+#
+#   helm repo add kyverno https://kyverno.github.io/kyverno/ && helm repo update
+#   helm install kyverno kyverno/kyverno -n kyverno --create-namespace
+#   kubectl apply -f security/kyverno-policies.yaml
+#
+# Политики ограничены namespace `fastapi-*`: иначе Enforce остановил бы
+# системные поды (kube-system, ingress-nginx, мониторинг ...), которые
+# работают от root намеренно.
+#
+# failureAction задаётся в правиле (validate.failureAction): поле
+# spec.validationFailureAction в ClusterPolicy v1 помечено как deprecated.
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: disallow-privileged-containers
+  annotations:
+    policies.kyverno.io/title: Запрет привилегированных контейнеров
+    policies.kyverno.io/category: Pod Security
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/description: >-
+      Привилегированный контейнер получает почти все возможности хоста, а
+      побег из него равен компрометации узла.
+spec:
+  background: true
+  rules:
+    - name: no-privileged
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              namespaces: ["fastapi-*"]
+      validate:
+        failureAction: Enforce
+        message: "Привилегированные контейнеры запрещены (securityContext.privileged должен быть false)."
+        pattern:
+          spec:
+            # =(поле) — «если поле задано, оно должно быть таким»; отсутствие
+            # securityContext эквивалентно privileged: false.
+            =(initContainers):
+              - =(securityContext):
+                  =(privileged): "false"
+            containers:
+              - =(securityContext):
+                  =(privileged): "false"
+---
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: require-run-as-nonroot
+  annotations:
+    policies.kyverno.io/title: Контейнеры только не от root
+    policies.kyverno.io/category: Pod Security
+    policies.kyverno.io/severity: high
+    policies.kyverno.io/description: >-
+      Процесс от root внутри контейнера упрощает побег и повышение
+      привилегий; runAsNonRoot должен быть true на уровне пода или контейнера.
+spec:
+  background: true
+  rules:
+    - name: run-as-non-root
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              namespaces: ["fastapi-*"]
+      validate:
+        failureAction: Enforce
+        message: "Контейнеры должны запускаться не от root (securityContext.runAsNonRoot: true)."
+        anyPattern:
+          - spec:
+              securityContext:
+                runAsNonRoot: true
+          - spec:
+              containers:
+                - securityContext:
+                    runAsNonRoot: true
+---
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: disallow-latest-tag
+  annotations:
+    policies.kyverno.io/title: Запрет тега :latest
+    policies.kyverno.io/category: Best Practices
+    policies.kyverno.io/severity: medium
+    policies.kyverno.io/description: >-
+      Тег latest не воспроизводим: два пода одного Deployment могут запустить
+      разные версии. Режим Audit — локальные образы Minikube (fastapi-app:latest)
+      не блокируются, но нарушения видны в PolicyReport.
+spec:
+  background: true
+  rules:
+    - name: no-latest-tag
+      match:
+        any:
+          - resources:
+              kinds: [Pod]
+              namespaces: ["fastapi-*"]
+      validate:
+        failureAction: Audit
+        message: "Используйте конкретный тег образа, а не :latest."
+        pattern:
+          spec:
+            containers:
+              - image: "!*:latest"

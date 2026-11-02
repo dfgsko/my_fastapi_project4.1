@@ -19,24 +19,41 @@ spec:
       labels:
         app.kubernetes.io/name: db-migrate
         app.kubernetes.io/instance: {{ .Release.Name }}
+        app: db-migrate
     spec:
       restartPolicy: OnFailure
+      automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 2000
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: migrate
           image: {{ include "fastapi-api.image" . | quote }}
           imagePullPolicy: {{ .Values.global.image.pullPolicy }}
-          command: ["alembic", "upgrade", "head"]
+          # После миграций — идемпотентное создание первого администратора.
+          command: ["sh", "-c", "alembic upgrade head && python -m app.bootstrap"]
           envFrom:
             - configMapRef:
                 name: {{ include "fastapi-api.configName" . }}
             - secretRef:
                 name: {{ include "fastapi-api.secretName" . }}
+            - secretRef:
+                name: {{ include "fastapi-api.bootstrapSecret" . }}
           securityContext:
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - {name: tmp, mountPath: /tmp}
           resources:
             requests: {memory: 128Mi, cpu: 100m}
             limits: {memory: 256Mi, cpu: 500m}
+      volumes:
+        - name: tmp
+          emptyDir: {sizeLimit: 16Mi}
 {{- end }}

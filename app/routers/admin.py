@@ -11,6 +11,7 @@ HTML-страница (для сотрудника, который открыв�
 и видит агрегированные данные по сущностям.
 """
 
+from html import escape as html_escape
 from typing import List
 
 from fastapi import APIRouter, Depends
@@ -18,12 +19,14 @@ from fastapi.responses import HTMLResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.auth import require_admin
 from app.database import get_db
 from app.db_models.course import Course as CourseORM
 from app.db_models.enrollment import Enrollment as EnrollmentORM
 from app.models.course import CoursePopularity
 
-router = APIRouter(prefix="/admin", tags=["admin"])
+# Весь раздел — только для роли admin (зависимость на уровне роутера).
+router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(require_admin)])
 
 
 async def _fetch_popularity(session: AsyncSession) -> List[CoursePopularity]:
@@ -71,7 +74,9 @@ async def admin_dashboard(session: AsyncSession = Depends(get_db)) -> HTMLRespon
 
     if courses:
         rows_html = "".join(
-            f"<tr><td>{c.id}</td><td>{c.title}</td><td>{c.instructor}</td>"
+            # html.escape: названия курсов приходят от пользователей (XSS).
+            f"<tr><td>{c.id}</td><td>{html_escape(c.title)}</td>"
+            f"<td>{html_escape(c.instructor)}</td>"
             f"<td>{c.enrollment_count}</td></tr>"
             for c in courses
         )

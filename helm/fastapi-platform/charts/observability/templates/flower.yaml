@@ -21,6 +21,14 @@ spec:
         app.kubernetes.io/instance: {{ .Release.Name }}
         app: flower
     spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: flower
           image: {{ .Values.flower.image | quote }}
@@ -41,8 +49,19 @@ spec:
             periodSeconds: 15
           securityContext:
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - {name: tmp, mountPath: /tmp}
+            - {name: data, mountPath: /data}
           resources:
             {{- toYaml .Values.flower.resources | nindent 12 }}
+      volumes:
+        - name: tmp
+          emptyDir: {sizeLimit: 32Mi}
+        - name: data
+          emptyDir: {sizeLimit: 32Mi}
 ---
 apiVersion: v1
 kind: Service

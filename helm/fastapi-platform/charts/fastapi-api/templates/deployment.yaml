@@ -20,10 +20,17 @@ spec:
     metadata:
       labels:
         {{- include "fastapi-api.selectorLabels" . | nindent 8 }}
+        app: fastapi            # метка для NetworkPolicy (общая с «сырыми» манифестами)
     spec:
+      serviceAccountName: fastapi-sa
+      automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 2000
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: api
           image: {{ include "fastapi-api.image" . | quote }}
@@ -36,6 +43,8 @@ spec:
                 name: {{ include "fastapi-api.configName" . }}
             - secretRef:
                 name: {{ include "fastapi-api.secretName" . }}
+            - secretRef:
+                name: {{ include "fastapi-api.bootstrapSecret" . }}
           livenessProbe:
             httpGet:
               path: {{ .Values.probes.liveness.path }}
@@ -50,5 +59,13 @@ spec:
             periodSeconds: {{ .Values.probes.readiness.periodSeconds }}
           securityContext:
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - {name: tmp, mountPath: /tmp}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
+      volumes:
+        - name: tmp
+          emptyDir: {sizeLimit: 64Mi}

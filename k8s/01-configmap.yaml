@@ -14,3 +14,20 @@ data:
   # Схему БД создаёт Job db-migrate (alembic), а не реплики API.
   AUTO_CREATE_TABLES: "false"
   CERTIFICATES_DIR: "/app/certificates"
+  # --- Безопасность (лаб. № 5) ---
+  # production: приложение откажется стартовать без SECRET_KEY ≥ 32 символов.
+  ENVIRONMENT: "production"
+  JWT_ALGORITHM: "HS256"
+  ACCESS_TOKEN_EXPIRE_MINUTES: "30"
+  REFRESH_TOKEN_EXPIRE_DAYS: "7"
+  BCRYPT_ROUNDS: "12"
+  PASSWORD_MIN_LENGTH: "10"
+  AUTH_RATE_LIMIT_MAX: "10"          # попыток входа на логин за окно
+  AUTH_RATE_LIMIT_WINDOW: "60"
+  # Допустимые значения заголовка Host. Пробы и /metrics проверку обходят.
+  TRUSTED_HOSTS: "fastapi.local,fastapi.example.com,fastapi-service,fastapi-service.fastapi-app.svc.cluster.local,localhost"
+  CORS_ORIGINS: ""                   # пусто = CORS выключен; иначе список через запятую
+  SECURE_HEADERS_ENABLED: "true"
+  METRICS_BLOCK_PROXIED: "true"      # /metrics не отдаётся запросам через Ingress
+  DOCS_ENABLED: "true"               # в production можно выключить (Swagger/OpenAPI)
+  REGISTRATION_ENABLED: "true"

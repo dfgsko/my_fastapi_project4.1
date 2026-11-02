@@ -24,6 +24,9 @@ os.environ.setdefault("CERTIFICATES_DIR", "test_certificates")
 # В тестах нет RabbitMQ: коллектор длины очереди (/metrics) не подключаем.
 os.environ.setdefault("CELERY_QUEUE_METRICS", "false")
 os.environ.setdefault("S3_BUCKET", "fastapi-files")
+# Безопасность: быстрый bcrypt и фиксированный ключ подписи JWT для тестов.
+os.environ.setdefault("BCRYPT_ROUNDS", "4")
+os.environ.setdefault("SECRET_KEY", "test-secret-key-for-pytest-only-0123456789abcdef")
 
 import pytest
 import pytest_asyncio
@@ -75,11 +78,83 @@ def fake_redis():
     redis_client._redis_available = False
 
 
+TEST_PASSWORD = "Test-passw0rd-1"
+
+
 @pytest_asyncio.fixture()
-async def client(db_session):
-    """Асинхронный HTTP-клиент, обращающийся к приложению напрямую (без сети)."""
+async def make_user(db_session):
+    """
+    Фабрика пользователей: создаёт запись (и студента для роли user) и
+    возвращает словарь с id, student_id и готовым заголовком Authorization.
+    """
+    from app.auth import ROLE_USER, create_access_token, hash_password
+    from app.db_models.student import Student
+    from app.db_models.user import User
+
+    async def _make(username: str, role: str = ROLE_USER, with_student: bool = True) -> dict:
+        async with db_session() as session:
+            student_id = None
+            if with_student:
+                student = Student(full_name=f"Student {username}", email=f"{username}@example.com")
+                session.add(student)
+                await session.flush()
+                student_id = student.id
+            user = User(
+                username=username,
+                hashed_password=hash_password(TEST_PASSWORD),
+                role=role,
+                student_id=student_id,
+            )
+            session.add(user)
+            await session.commit()
+            await session.refresh(user)
+            token = create_access_token(user)
+        return {
+            "id": user.id,
+            "username": username,
+            "student_id": student_id,
+            "headers": {"Authorization": f"Bearer {token}"},
+        }
+
+    return _make
+
+
+@pytest_asyncio.fixture()
+async def admin(make_user):
+    return await make_user("admin_test", role="admin", with_student=False)
+
+
+@pytest_asyncio.fixture()
+async def anon_client(db_session):
+    """Клиент БЕЗ токена (для проверки 401)."""
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        yield ac
+
+
+@pytest_asyncio.fixture()
+async def client(db_session, admin):
+    """
+    Клиент с токеном администратора: до лаб. № 5 все эндпоинты были открыты,
+    поэтому существующие тесты функциональности работают от имени админа.
+    Проверки безопасности используют anon_client / make_user.
+    """
+    transport = ASGITransport(app=app)
+    async with AsyncClient(
+        transport=transport, base_url="http://test", headers=admin["headers"]
+    ) as ac:
+        yield ac
+
+
+@pytest_asyncio.fixture()
+async def user_client(db_session, make_user):
+    """Клиент обычного пользователя (роль user со своим студентом)."""
+    info = await make_user("alice")
+    transport = ASGITransport(app=app)
+    async with AsyncClient(
+        transport=transport, base_url="http://test", headers=info["headers"]
+    ) as ac:
+        ac.info = info
         yield ac
 
 

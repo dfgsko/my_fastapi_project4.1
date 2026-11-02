@@ -1,12 +1,28 @@
 # Опционально. minikube addons enable ingress
 # затем: echo "$(minikube ip) fastapi.local" | sudo tee -a /etc/hosts
+#
+# Лаб. № 5: HTTPS через cert-manager (security/cert-manager-issuers.yaml).
+# cert-manager видит аннотацию cluster-issuer и блок tls, сам выпускает
+# сертификат и кладёт его в Secret fastapi-tls; продлевает автоматически.
+#   curl -k https://fastapi.local/health        # самоподписанный → -k
+#   curl -I http://fastapi.local/               # 308 → https (ssl-redirect)
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: fastapi-ingress
   namespace: fastapi-app
+  annotations:
+    cert-manager.io/cluster-issuer: selfsigned-issuer   # для домена: letsencrypt-prod
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    # Ограничение размера тела запроса (загрузка файлов — до 10 МБ в приложении).
+    nginx.ingress.kubernetes.io/proxy-body-size: "12m"
 spec:
   ingressClassName: nginx
+  tls:
+    - hosts:
+        - fastapi.local
+      secretName: fastapi-tls
   rules:
     - host: fastapi.local
       http:

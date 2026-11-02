@@ -19,7 +19,16 @@ spec:
       labels:
         app.kubernetes.io/name: rabbitmq
         app.kubernetes.io/instance: {{ .Release.Name }}
+        app: rabbitmq           # метка для NetworkPolicy
     spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 100
+        runAsGroup: 101
+        fsGroup: 101
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: rabbitmq
           image: {{ .Values.rabbitmq.image | quote }}
@@ -51,8 +60,23 @@ spec:
             initialDelaySeconds: 60
             periodSeconds: 30
             timeoutSeconds: 10
+          # readOnlyRootFilesystem не включён: образ хранит конфиги в
+          # /etc/rabbitmq/conf.d и пишет в /var/lib|log/rabbitmq (см. k8s/12-rabbitmq.yaml).
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - {name: data, mountPath: /var/lib/rabbitmq}
+            - {name: logs, mountPath: /var/log/rabbitmq}
           resources:
             {{- toYaml .Values.rabbitmq.resources | nindent 12 }}
+      volumes:
+        - name: data
+          emptyDir: {}
+        - name: logs
+          emptyDir: {}
 ---
 apiVersion: v1
 kind: Service

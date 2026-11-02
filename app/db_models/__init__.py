@@ -7,4 +7,4 @@ Base.metadata — это важно для `Base.metadata.create_all` в
 app/main.py и для Alembic autogenerate в migrations/env.py.
 """
 
-from app.db_models import course, student, enrollment  # noqa: F401
+from app.db_models import course, student, enrollment, user  # noqa: F401

@@ -11,11 +11,17 @@ POST /enrollments ограничен rate limiting-ом (5/мин на студ�
     kubectl port-forward svc/fastapi-service 8000:80 -n fastapi-app
     python scripts/load_test.py --count 100
 
+С лаб. № 5 API требует JWT: скрипт входит как администратор (создание
+студентов и завершение записей — права admin). Учётные данные — из
+ADMIN_BOOTSTRAP_USERNAME / ADMIN_BOOTSTRAP_PASSWORD (k8s/02-secrets.yaml)
+или аргументов --username / --password.
+
 В соседнем терминале:
     kubectl get pods -l app=celery-worker -n fastapi-app -w
 """
 
 import argparse
+import os
 import sys
 import time
 import uuid
@@ -47,12 +53,24 @@ def main() -> int:
     parser.add_argument("--base-url", default="http://localhost:8000")
     parser.add_argument("--count", type=int, default=100, help="сколько задач создать")
     parser.add_argument("--workers", type=int, default=10, help="параллельных запросов")
+    parser.add_argument("--username", default=os.environ.get("API_USER", "admin"))
+    parser.add_argument(
+        "--password", default=os.environ.get("API_PASSWORD", "ChangeMe-Admin-2026")
+    )
     args = parser.parse_args()
 
     run_id = uuid.uuid4().hex[:8]
     started = time.monotonic()
 
     with httpx.Client(base_url=args.base_url, timeout=30) as client:
+        login = client.post(
+            "/auth/token", data={"username": args.username, "password": args.password}
+        )
+        if login.status_code != 200:
+            print(f"Не удалось войти ({login.status_code}): {login.text}", file=sys.stderr)
+            return 2
+        client.headers["Authorization"] = f"Bearer {login.json()['access_token']}"
+
         course = client.post(
             "/courses",
             json={

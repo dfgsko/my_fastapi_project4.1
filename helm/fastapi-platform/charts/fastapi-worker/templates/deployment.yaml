@@ -19,11 +19,17 @@ spec:
     metadata:
       labels:
         {{- include "fastapi-worker.selectorLabels" . | nindent 8 }}
+        app: celery-worker      # метка для NetworkPolicy
     spec:
       terminationGracePeriodSeconds: 60
+      automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 2000
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: worker
           image: {{ include "fastapi-worker.image" . | quote }}
@@ -39,6 +45,7 @@ spec:
           volumeMounts:
             - name: certificates
               mountPath: /app/certificates
+            - {name: tmp, mountPath: /tmp}
           livenessProbe:
             exec:
               command:
@@ -51,8 +58,13 @@ spec:
             failureThreshold: 3
           securityContext:
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
       volumes:
         - name: certificates
           emptyDir: {}
+        - name: tmp
+          emptyDir: {sizeLimit: 64Mi}

@@ -15,19 +15,35 @@ spec:
         app: db-migrate
     spec:
       restartPolicy: OnFailure
+      automountServiceAccountToken: false
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 2000
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: migrate
           image: fastapi-app:latest
           imagePullPolicy: IfNotPresent
-          command: ["alembic", "upgrade", "head"]
+          # После миграций — идемпотентное создание первого администратора
+          # (ADMIN_BOOTSTRAP_USERNAME / ADMIN_BOOTSTRAP_PASSWORD).
+          command: ["sh", "-c", "alembic upgrade head && python -m app.bootstrap"]
           envFrom:
             - configMapRef: {name: app-config}
             - secretRef: {name: app-secrets}
+            - secretRef: {name: app-bootstrap-secrets}
           securityContext:
             allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - {name: tmp, mountPath: /tmp}
           resources:
             requests: {memory: 128Mi, cpu: 100m}
             limits: {memory: 256Mi, cpu: 500m}
+      volumes:
+        - name: tmp
+          emptyDir: {sizeLimit: 16Mi}
