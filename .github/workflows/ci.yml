@@ -61,7 +61,9 @@ jobs:
               -f environments/$env/values.yaml > /dev/null
           done
       - name: NetworkPolicy сгенерированы из Helm-шаблона (нет расхождений)
-        run: ./scripts/gen-network-policies.sh --check
+        run: |
+          python3 -m pip install --quiet pyyaml
+          ./scripts/gen-network-policies.sh --check
       - name: helm template без SeaweedFS и мониторинга (кластер без их CRD)
         run: |
           helm template fastapi-min helm/fastapi-platform \
