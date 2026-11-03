@@ -1,7 +1,7 @@
-# Фронтенд «Курсы и студенты» (лабораторная № 6)
+# Фронтенд «Курсы и студенты» (лабораторные № 6–7)
 
-MVP-интерфейс на **Vue 3 + Vite**: вход по JWT через FastAPI, главный экран со списком курсов из БД,
-защита маршрутов. Фронтенд запускается **на компьютере** (`npm run dev`), а не в Kubernetes.
+Интерфейс на **Vue 3 + Vite**: вход по JWT через FastAPI, список курсов из БД (лаб. № 6) и полный CRUD —
+детали, создание, редактирование и удаление курсов — на собственных UI-компонентах (лаб. № 7). Фронтенд запускается **на компьютере** (`npm run dev`), а не в Kubernetes.
 
 | Что | Где |
 |-----|-----|
@@ -89,21 +89,111 @@ Vite не уйдёт молча на 5174, где бэкенд не разреш
 | После 30 минут перекидывает на `/login` | истёк access-токен (так задумано: refresh-токен в MVP не используется) |
 | «Слишком много попыток входа» | сработал лимит попыток входа бэкенда (лаб. № 5), подождите минуту |
 
+## Лабораторная № 7: компоненты, composables и CRUD
+
+### Структура
+
+```
+src/
+├── api/
+│   ├── client.js          # Axios: JWT в заголовке, 401 → /login (лаб. 6)
+│   ├── courses.js         # методы API курсов и toCoursePayload (только поля курса)
+│   └── errors.js          # разбор 422 FastAPI/Pydantic v2, понятные сообщения по статусу
+├── components/
+│   ├── ui/                # «кирпичики» без знаний о предметной области
+│   │   ├── BaseButton.vue      # variant primary/secondary/danger, size sm/md/lg, loading, disabled
+│   │   ├── BaseInput.vue       # v-model (defineModel), label, hint, error, textarea (multiline)
+│   │   ├── BaseModal.vue       # Teleport в body, Transition, Escape, фон, фокус, persistent
+│   │   ├── BaseCard.vue        # контейнер; as=li/article, interactive (hover/focus)
+│   │   ├── ToastNotification.vue
+│   │   └── ToastContainer.vue  # Teleport + TransitionGroup
+│   ├── CourseCard.vue     # карточка курса в списке (вся карточка — ссылка)
+│   └── CourseForm.vue     # одна форма для создания и редактирования
+├── composables/
+│   ├── useResource.js     # list/one/create/update/remove + isLoading/error/notFound
+│   ├── useForm.js         # значения, валидация, submit, ошибки 422 по полям, isDirty
+│   ├── useToast.js        # глобальные уведомления (singleton)
+│   └── useDebounce.js     # отложенное значение для поиска
+├── views/
+│   ├── HomeView.vue           # список + поиск по преподавателю + «+ Добавить»
+│   ├── CourseDetailView.vue   # детали, «Редактировать», «Удалить» с подтверждением
+│   ├── CourseCreateView.vue   # POST
+│   ├── CourseEditView.vue     # PUT, обработка 404
+│   ├── LoginView.vue, NotFoundView.vue
+└── assets/main.css        # дизайн-токены: --color-*, --radius-*, --shadow-*, --focus-ring
+```
+
+| Маршрут | Экран | Доступ |
+|---------|-------|--------|
+| `/` | список курсов | вход обязателен |
+| `/courses/create` | создание | только admin |
+| `/courses/:id` | детали | вход обязателен |
+| `/courses/:id/edit` | редактирование | только admin |
+
+Статический `/courses/create` объявлен раньше `/courses/:id`, а `:id` дополнительно ограничен цифрами (`:id(\\d+)`).
+Роль пользователя берётся из `GET /auth/me`: обычный пользователь не видит кнопок изменения, и guard не пускает его
+на create/edit. Настоящую проверку прав выполняет бэкенд (403), интерфейс лишь не предлагает недоступное.
+
+### Что важно в реализации
+
+* **Формы.** `CourseForm` получает `onSubmit` как async-функцию (prop), а не через `emit('submit')`: emit не возвращает
+  промис, и ошибка 422 от сервера до формы не дошла бы. Клиент проверяет обязательность, длину и целое число часов,
+  верхнюю границу (1000 ч) проверяет только сервер — так видно разбор 422 под полем. В PUT уходят только поля курса:
+  `id` из загруженной записи бэкенд отклонил бы как лишнее поле (`extra="forbid"`, лаб. № 5).
+* **422.** `useForm` раскладывает `detail[]` FastAPI по полям (`loc[1]`), переводит типовые ошибки Pydantic v2
+  (`less_than_equal`, `string_too_long`, `missing`…) на русский, а ошибки по полям, которых нет в форме, показывает общим
+  текстом — они не теряются молча.
+* **Состояния.** Загрузка, ошибка с кнопкой «Повторить», пустой список, «Ничего не найдено», «Запись не найдена»,
+  блокировка кнопок во время запроса и защита от двойной отправки.
+* **Удаление** — через модалку подтверждения; пока идёт DELETE, окно не закрывается. В `useResource` удаление
+  оптимистичное: запись сразу исчезает из списка и возвращается при ошибке.
+* **Поиск** по преподавателю: запрос `GET /courses?instructor=…` уходит через 300 мс после паузы в наборе (debounce),
+  ответ на устаревший запрос не перезаписывает более новый.
+* **CSS.** Только `<style scoped>` и CSS-переменные из `main.css`; состояния `:hover`, `:focus-visible`, `:disabled`;
+  адаптивная сетка `repeat(auto-fill, minmax(240px, 1fr))`: 3 колонки на 1280 px, 1 колонка на 400 px.
+* **Доступность.** `label for`, `aria-invalid` и `aria-describedby` у полей, `role="dialog"`, `aria-modal` и фокус в модалке,
+  `role="alert"/"status"` у уведомлений, карточка-ссылка доступна с клавиатуры.
+
+### Сквозной CRUD-сценарий (скриншоты из Chrome)
+
+Скриншоты сняты в настоящем браузере (Chrome через Playwright) при работающих `uvicorn` и `npm run dev`.
+
+| Сценарий | Что произошло | Скриншот |
+|----------|---------------|----------|
+| Открыть `/courses/create` без входа | редирект на `/login?redirect=…` | ![](../docs/screenshots/lab7/01-redirect-login.png) |
+| Вход администратором | список курсов, кнопка «+ Добавить» | ![](../docs/screenshots/lab7/02-list-desktop.png) |
+| Отправить пустую форму | ошибки под полями, запрос не уходит | ![](../docs/screenshots/lab7/03-create-validation.png) |
+| 3000 часов | FastAPI 422 → «Значение должно быть не больше 1000» под полем | ![](../docs/screenshots/lab7/04-create-422.png) |
+| Создать валидный курс | toast «создан», переход на детали | ![](../docs/screenshots/lab7/05-created-detail-toast.png) |
+| Редактировать | форма заполнена текущими данными | ![](../docs/screenshots/lab7/06-edit-form.png) |
+| Сохранить | toast «Изменения сохранены» | ![](../docs/screenshots/lab7/07-edited-toast.png) |
+| «Удалить» | модалка подтверждения (отмена — курс на месте) | ![](../docs/screenshots/lab7/08-delete-modal.png) |
+| Подтвердить удаление | toast «удалён», переход на список | ![](../docs/screenshots/lab7/09-deleted-toast.png) |
+| Детали удалённого курса | «Запись не найдена» | ![](../docs/screenshots/lab7/10-not-found.png) |
+| Окно 400 px | карточки в одну колонку | ![](../docs/screenshots/lab7/11-list-mobile-400px.png) |
+| Вход студентом | курс виден, кнопок изменения нет | ![](../docs/screenshots/lab7/12-student-detail.png) |
+| Бэкенд остановлен | «Сервер недоступен…» и «Повторить», а не белый экран | ![](../docs/screenshots/lab7/13-backend-down.png) |
+
+Повторить съёмку: запустить бэкенд и `NO_DEVTOOLS=1 npm run dev` (без плавающей панели Vue DevTools).
+
 ## Тесты и проверки
 
 ```bash
 npm run test:unit          # Vitest в режиме watch
-npm run test:run           # однократный прогон (53 теста)
+npm run test:run           # однократный прогон (167 тестов)
 npm run lint:check         # oxlint + ESLint без автоисправлений
 npm run format:check       # Prettier
 npm run build              # production-сборка в dist/
 ```
 
-«Живой» сквозной тест против настоящего бэкенда: jsdom работает с origin `http://localhost:5173` и выполняет
-CORS-проверки как браузер, поэтому без настроенного CORS тест падает.
+Тесты лаб. № 7: UI-компоненты (`components/ui/__tests__`), `useForm`, `useResource`, разбор ошибок API, `CourseForm`,
+`CourseCard`, экраны деталей, создания и редактирования, маршруты и сквозной CRUD-сценарий (`src/__tests__/app-flow.spec.js`).
+
+«Живые» сквозные тесты против настоящего бэкенда: jsdom работает с origin `http://localhost:5173` и выполняет
+CORS-проверки как браузер. Проверяются вход, CRUD (создание с 422, детали, PUT, DELETE, 404) и права студента.
 
 ```bash
 uvicorn app.main:app --port 8000      # в корне репозитория
 python scripts/seed_demo.py
-npm run test:live                     # login → JWT → список из БД → logout; новый курс виден после обновления
+npm run test:live                     # вход, CRUD с 422 и 404, права студента
 ```

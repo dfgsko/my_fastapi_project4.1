@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
-import { useAuthStore } from '@/stores/auth'
+import { useAuthStore, safeRedirect } from '@/stores/auth'
 import apiClient from '@/api/client'
 
 // Мокаем apiClient и useRouter: тест проверяет только логику store.
@@ -77,5 +77,42 @@ describe('Auth Store', () => {
 
   it('без сохранённого токена пользователь не авторизован', () => {
     expect(useAuthStore().isAuthenticated).toBe(false)
+  })
+
+  it('login запрашивает /auth/me и определяет роль администратора', async () => {
+    apiClient.post.mockResolvedValue({ data: { access_token: 't' } })
+    apiClient.get.mockResolvedValue({ data: { username: 'admin', role: 'admin' } })
+    const store = useAuthStore()
+    await store.login('admin', 'p')
+    expect(apiClient.get).toHaveBeenCalledWith('/auth/me')
+    expect(store.user.role).toBe('admin')
+    expect(store.isAdmin).toBe(true)
+  })
+
+  it('сбой /auth/me не мешает входу: пользователь вошёл, роль неизвестна', async () => {
+    apiClient.post.mockResolvedValue({ data: { access_token: 't' } })
+    apiClient.get.mockRejectedValue(new Error('Network Error'))
+    const store = useAuthStore()
+    await store.login('u', 'p')
+    expect(store.isAuthenticated).toBe(true)
+    expect(store.isAdmin).toBe(false)
+  })
+
+  it('logout сбрасывает и данные пользователя', () => {
+    const store = useAuthStore()
+    store.token = 't'
+    store.user = { role: 'admin' }
+    store.logout()
+    expect(store.user).toBeNull()
+    expect(store.isAdmin).toBe(false)
+  })
+
+  it.each([
+    ['/courses/5', '/courses/5'],
+    [undefined, '/'],
+    ['//evil.example', '/'],
+    ['https://evil.example', '/'],
+  ])('safeRedirect(%s) → %s (нет открытого редиректа)', (target, expected) => {
+    expect(safeRedirect(target)).toBe(expected)
   })
 })

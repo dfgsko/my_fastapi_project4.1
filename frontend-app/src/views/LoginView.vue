@@ -2,6 +2,9 @@
 <script setup>
 import { ref } from 'vue'
 import { useAuthStore } from '@/stores/auth'
+import BaseButton from '@/components/ui/BaseButton.vue'
+import BaseCard from '@/components/ui/BaseCard.vue'
+import BaseInput from '@/components/ui/BaseInput.vue'
 
 const auth = useAuthStore()
 const username = ref('')
@@ -32,63 +35,45 @@ async function handleSubmit() {
 </script>
 
 <template>
-  <div class="login-container">
+  <BaseCard class="login-container">
     <h2>Login</h2>
     <form @submit.prevent="handleSubmit">
-      <label for="username">Username</label>
-      <input id="username" v-model="username" autocomplete="username" required />
-      <label for="password">Password</label>
-      <input
+      <BaseInput
+        id="username"
+        v-model="username"
+        label="Username"
+        autocomplete="username"
+        required
+      />
+      <BaseInput
         id="password"
         v-model="password"
         type="password"
+        label="Password"
         autocomplete="current-password"
         required
       />
       <p v-if="error" class="error" role="alert">{{ error }}</p>
-      <button type="submit" :disabled="isLoading">
+      <BaseButton type="submit" size="lg" class="submit" :loading="isLoading">
         {{ isLoading ? 'Logging in…' : 'Login' }}
-      </button>
+      </BaseButton>
     </form>
-  </div>
+  </BaseCard>
 </template>
 
 <style scoped>
 .login-container {
   max-width: 400px;
   margin: 50px auto;
-  padding: 24px;
-  border: 1px solid #ccc;
-  border-radius: 8px;
-  background: #fff;
 }
-form {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-input {
-  padding: 8px;
-  border: 1px solid #bbb;
-  border-radius: 4px;
-  font-size: 1rem;
+h2 {
+  margin-top: 0;
 }
 .error {
-  color: #c00;
-  margin: 4px 0;
+  color: var(--color-danger, #c53030);
+  margin: 0 0 1rem;
 }
-button {
-  margin-top: 10px;
-  padding: 10px;
-  border: 0;
-  border-radius: 4px;
-  background: #2a6df4;
-  color: #fff;
-  font-size: 1rem;
-  cursor: pointer;
-}
-button:disabled {
-  opacity: 0.5;
-  cursor: default;
+.submit {
+  width: 100%;
 }
 </style>

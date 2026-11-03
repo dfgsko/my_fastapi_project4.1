@@ -1,6 +1,6 @@
 # Educational Platform API — Курсы, студенты и зачисления
 
-Вариант 8 («Курсы и студенты»). Проект прошёл шесть лабораторных работ:
+Вариант 8 («Курсы и студенты»). Проект прошёл семь лабораторных работ:
 
 | Лаб. | Что сделано | Где описано |
 |------|-------------|-------------|
@@ -8,7 +8,8 @@
 | №3 | PostgreSQL, RabbitMQ, Kubernetes (Minikube), Helm umbrella-чарт, KEDA, CloudNativePG, Argo CD, Image Updater, GitHub Actions | разделы «Kubernetes» … «CI» ниже |
 | №4 | Наблюдаемость и S3: Prometheus, Grafana, Alertmanager, Loki, Alloy, Flower, SeaweedFS (S3 API) | раздел «Лабораторная № 4» ниже |
 | №5 | Безопасность: JWT и роли, защита от BOLA, Vault, NetworkPolicy, Pod Security, TLS (cert-manager), Kyverno, Falco, Trivy | раздел «Лабораторная № 5» ниже |
-| **№6** | **MVP-фронтенд на Vue 3: вход по JWT, главный экран со списком курсов, маршрутизация** | раздел «Лабораторная № 6» ниже и `frontend-app/README.md` |
+| №6 | MVP-фронтенд на Vue 3: вход по JWT, главный экран со списком курсов, маршрутизация | раздел «Лабораторная № 6» ниже и `frontend-app/README.md` |
+| **№7** | **Компоненты фронтенда: UI-кит, composables, CRUD курсов, toast-уведомления** | раздел «Лабораторная № 7» ниже и `frontend-app/README.md` |
 
 ## Архитектура
 
@@ -435,6 +436,15 @@ aws --endpoint-url http://localhost:8333 s3 ls s3://fastapi-files        # (AWS_
 | Дашборд не появился | ConfigMap без метки `grafana_dashboard=1`; `kubectl logs -n monitoring deploy/monitoring-grafana -c grafana-sc-dashboard` |
 | `celery_queue_length` отсутствует | API не достаёт RabbitMQ или очередь `celery` ещё не создана (воркер не запускался) |
 | Pod Prometheus/Loki `Pending` | не хватает ресурсов Minikube: `minikube start --cpus=4 --memory=8192` |
+
+## Лабораторная № 7: компонентная архитектура фронтенда и CRUD
+
+Во фронтенде появились собственные UI-компоненты (`BaseButton`, `BaseInput`, `BaseModal`, `BaseCard`, toast-уведомления),
+composables (`useResource`, `useForm`, `useToast`, `useDebouncedRef`) и экраны деталей, создания и редактирования курса.
+Пользователь создаёт, правит и удаляет курсы через `POST/PUT/DELETE /courses`, ошибки 422 FastAPI показываются под полями,
+удаление подтверждается в модальном окне. Описание компонентов, маршрутов и скриншоты сквозного CRUD-сценария
+из Chrome — в [`frontend-app/README.md`](frontend-app/README.md#лабораторная--7-компоненты-composables-и-crud).
+Бэкенд не менялся: CRUD-эндпоинты курсов и роли были готовы в лаб. № 3–5.
 
 ## Лабораторная № 6: MVP-фронтенд на Vue.js
 

@@ -32,7 +32,7 @@ export default defineConfig([
 
   // Тесты выполняются в Node (vitest): там доступны process.env и т. п.
   {
-    files: ['src/**/__tests__/*'],
+    files: ['src/**/__tests__/*', '*.config.js'],
     languageOptions: { globals: { ...globals.node } },
   },
 

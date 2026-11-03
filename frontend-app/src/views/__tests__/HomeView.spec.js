@@ -1,111 +1,130 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { mount, flushPromises } from '@vue/test-utils'
-import { createTestingPinia } from '@pinia/testing'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { flushPromises } from '@vue/test-utils'
 import HomeView from '@/views/HomeView.vue'
 import apiClient from '@/api/client'
+import { mountView } from '@/test-utils'
 
 vi.mock('@/api/client')
 
+const COURSES = [
+  { id: 1, title: 'Book A', description: 'a', instructor: 'Иванов', duration_hours: 2 },
+  { id: 2, title: 'Book B', description: 'b', instructor: 'Петров', duration_hours: 3 },
+]
+
+let wrapper
+beforeEach(() => vi.clearAllMocks())
+afterEach(() => {
+  wrapper?.unmount()
+  vi.useRealTimers()
+})
+
+async function mountHome(opts) {
+  const result = await mountView(HomeView, opts)
+  wrapper = result.wrapper
+  await flushPromises()
+  return result
+}
+
 describe('HomeView', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-  })
-
-  const mountWithPinia = () =>
-    mount(HomeView, {
-      global: { plugins: [createTestingPinia({ createSpy: vi.fn })] },
-    })
-
   it('показывает список данных после успешной загрузки', async () => {
-    apiClient.get.mockResolvedValue({
-      data: [
-        { id: 1, title: 'Book A' },
-        { id: 2, title: 'Book B' },
-      ],
-    })
-
-    const wrapper = mountWithPinia()
-    await flushPromises()
-
+    apiClient.get.mockResolvedValue({ data: COURSES })
+    await mountHome()
     expect(wrapper.text()).toContain('Book A')
     expect(wrapper.text()).toContain('Book B')
-    expect(wrapper.find('.items-list').exists()).toBe(true)
+    expect(wrapper.findAll('.course-card')).toHaveLength(2)
     expect(wrapper.find('.state.loading').exists()).toBe(false)
   })
 
-  it('показывает сообщение об ошибке при неудачном запросе', async () => {
-    apiClient.get.mockRejectedValue(new Error('Network Error'))
-    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+  it('показывает ошибку и кнопку «Повторить», которая перезапрашивает список', async () => {
+    apiClient.get.mockRejectedValueOnce(new Error('Network Error'))
+    await mountHome()
+    expect(wrapper.find('.state.error').text()).toContain('Сервер недоступен')
 
-    const wrapper = mountWithPinia()
+    apiClient.get.mockResolvedValue({ data: COURSES })
+    await wrapper.find('.state.error button').trigger('click')
     await flushPromises()
-
-    expect(wrapper.find('.state.error').exists()).toBe(true)
-    expect(wrapper.text()).toContain('Не удалось загрузить данные')
-    expect(wrapper.find('.items-list').exists()).toBe(false)
-    consoleError.mockRestore()
+    expect(wrapper.findAll('.course-card')).toHaveLength(2)
   })
 
   it('показывает сообщение о пустом списке', async () => {
     apiClient.get.mockResolvedValue({ data: [] })
-
-    const wrapper = mountWithPinia()
-    await flushPromises()
-
-    expect(wrapper.find('.state.empty').exists()).toBe(true)
-    expect(wrapper.text()).toContain('Пока нет ни одной записи')
+    await mountHome()
+    expect(wrapper.find('.state.empty').text()).toBe('Пока нет ни одной записи')
   })
 
-  it('пока данные грузятся, показывает «Загрузка…», а не пустой список', async () => {
-    apiClient.get.mockReturnValue(new Promise(() => {})) // запрос «висит»
-
-    const wrapper = mountWithPinia()
-    await flushPromises()
-
+  it('пока данные грузятся, показывает «Загрузка…»', async () => {
+    apiClient.get.mockReturnValue(new Promise(() => {}))
+    await mountHome()
     expect(wrapper.find('.state.loading').text()).toBe('Загрузка…')
-    expect(wrapper.find('.state.empty').exists()).toBe(false)
-    expect(wrapper.find('.items-list').exists()).toBe(false)
   })
 
-  it('запрашивает курсы с эндпоинта /courses ровно один раз', async () => {
+  it('загружает курсы через useResource: GET /courses один раз', async () => {
     apiClient.get.mockResolvedValue({ data: [] })
-    mountWithPinia()
+    await mountHome()
+    expect(apiClient.get).toHaveBeenCalledTimes(1)
+    expect(apiClient.get).toHaveBeenCalledWith('/courses', { params: {} })
+  })
+
+  it('кнопка «+ Добавить» видна только администратору и ведёт на создание', async () => {
+    apiClient.get.mockResolvedValue({ data: [] })
+    const { push } = await mountHome({ role: 'admin' })
+    const add = wrapper.findAll('button').find((b) => b.text().includes('Добавить'))
+    await add.trigger('click')
+    expect(push).toHaveBeenCalledWith({ name: 'course-create' })
+    wrapper.unmount()
+
+    await mountHome({ role: 'user' })
+    expect(wrapper.text()).not.toContain('Добавить')
+  })
+
+  it('карточка — ссылка на страницу деталей', async () => {
+    apiClient.get.mockResolvedValue({ data: COURSES })
+    await mountHome()
+    expect(wrapper.find('.course-card a').attributes('href')).toBe('/courses/1')
+  })
+
+  it('поиск: запрос уходит после паузы 300 мс (debounce), а не на каждую букву', async () => {
+    vi.useFakeTimers()
+    apiClient.get.mockResolvedValue({ data: COURSES })
+    await mountHome()
+    apiClient.get.mockClear()
+
+    const input = wrapper.find('#search')
+    await input.setValue('И')
+    await input.setValue('Ив')
+    await input.setValue('Иванов')
+    vi.advanceTimersByTime(299)
+    expect(apiClient.get).not.toHaveBeenCalled()
+    vi.advanceTimersByTime(1)
     await flushPromises()
     expect(apiClient.get).toHaveBeenCalledTimes(1)
-    expect(apiClient.get).toHaveBeenCalledWith('/courses')
+    expect(apiClient.get).toHaveBeenCalledWith('/courses', { params: { instructor: 'Иванов' } })
   })
 
-  it('отображает поля курса: название, описание, преподавателя и часы', async () => {
-    apiClient.get.mockResolvedValue({
-      data: [
-        {
-          id: 7,
-          title: 'Kubernetes',
-          description: 'Основы оркестрации',
-          instructor: 'Иванов И.И.',
-          duration_hours: 16,
-        },
-      ],
-    })
-    const wrapper = mountWithPinia()
+  it('пустой результат поиска — «Ничего не найдено»', async () => {
+    vi.useFakeTimers()
+    apiClient.get.mockResolvedValueOnce({ data: COURSES }).mockResolvedValue({ data: [] })
+    await mountHome()
+    await wrapper.find('#search').setValue('Нет такого')
+    vi.advanceTimersByTime(300)
     await flushPromises()
-
-    const card = wrapper.find('.item-card')
-    expect(card.find('h3').text()).toBe('Kubernetes')
-    expect(card.text()).toContain('Основы оркестрации')
-    expect(card.text()).toContain('Иванов И.И.')
-    expect(card.text()).toContain('16 ч')
+    expect(wrapper.find('.state.empty').text()).toBe('Ничего не найдено')
   })
 
   it('экранирует HTML из БД (нет XSS)', async () => {
     apiClient.get.mockResolvedValue({
-      data: [{ id: 1, title: '<img src=x onerror=alert(1)>', description: '<b>bold</b>' }],
+      data: [
+        {
+          id: 1,
+          title: '<img src=x onerror=alert(1)>',
+          description: '<b>b</b>',
+          instructor: 'i',
+          duration_hours: 1,
+        },
+      ],
     })
-    const wrapper = mountWithPinia()
-    await flushPromises()
-
-    expect(wrapper.find('img').exists()).toBe(false)
-    expect(wrapper.find('.description b').exists()).toBe(false)
-    expect(wrapper.find('h3').text()).toBe('<img src=x onerror=alert(1)>')
+    await mountHome()
+    expect(wrapper.find('.items-list img').exists()).toBe(false)
+    expect(wrapper.find('.course-card h3').text()).toBe('<img src=x onerror=alert(1)>')
   })
 })

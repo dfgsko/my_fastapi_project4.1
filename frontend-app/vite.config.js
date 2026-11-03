@@ -6,7 +6,8 @@ import vueDevTools from 'vite-plugin-vue-devtools'
 
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [vue(), vueDevTools()],
+  // NO_DEVTOOLS=1 — без плавающей панели Vue DevTools (для скриншотов).
+  plugins: [vue(), !process.env.NO_DEVTOOLS && vueDevTools()].filter(Boolean),
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),

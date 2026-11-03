@@ -1,81 +1,93 @@
-<!-- Главный экран: список курсов из БД (GET /courses) с тремя состояниями. -->
+<!-- Список курсов: useResource, поиск по преподавателю с debounce, адаптивная сетка. -->
 <script setup>
-import { ref, onMounted } from 'vue'
-import apiClient from '@/api/client'
+import { onMounted, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
+import { useResource } from '@/composables/useResource'
+import { useDebouncedRef } from '@/composables/useDebounce'
+import { useAuthStore } from '@/stores/auth'
+import BaseButton from '@/components/ui/BaseButton.vue'
+import BaseInput from '@/components/ui/BaseInput.vue'
+import CourseCard from '@/components/CourseCard.vue'
 
-const items = ref([])
-const isLoading = ref(true)
-const error = ref(null)
+const router = useRouter()
+const auth = useAuthStore()
+const { items, isLoading, error, fetchList } = useResource('/courses')
 
-async function loadItems() {
-  isLoading.value = true
-  error.value = null
-  try {
-    const response = await apiClient.get('/courses')
-    items.value = response.data
-  } catch (e) {
-    error.value = 'Не удалось загрузить данные. Попробуйте позже.'
-    console.error(e)
-  } finally {
-    isLoading.value = false
-  }
+const search = ref('')
+const debouncedSearch = useDebouncedRef(search, 300)
+
+// Фильтр выполняет бэкенд (GET /courses?instructor=…, частичное совпадение).
+function load() {
+  const instructor = debouncedSearch.value.trim()
+  return fetchList(instructor ? { instructor } : {})
 }
 
-// Загрузка в onMounted: компонент уже в DOM, поэтому переход «Загрузка… →
-// список/ошибка» рендерится предсказуемо, а запрос не уходит, пока компонент
-// не смонтирован (например, при серверном рендеринге).
-onMounted(loadItems)
+onMounted(load)
+watch(debouncedSearch, load)
 </script>
 
 <template>
-  <div class="home">
-    <h1>Курсы</h1>
-    <div v-if="isLoading" class="state loading">Загрузка…</div>
-    <div v-else-if="error" class="state error">{{ error }}</div>
-    <div v-else-if="items.length === 0" class="state empty">Пока нет ни одной записи</div>
-    <ul v-else class="items-list">
-      <li v-for="item in items" :key="item.id" class="item-card">
-        <h3>{{ item.title }}</h3>
-        <p class="description">{{ item.description }}</p>
-        <p class="meta">
-          <span>Преподаватель: {{ item.instructor }}</span>
-          <span>{{ item.duration_hours }} ч</span>
-        </p>
-      </li>
+  <div>
+    <header class="page-header">
+      <h1>Курсы</h1>
+      <BaseButton v-if="auth.isAdmin" @click="router.push({ name: 'course-create' })">
+        + Добавить
+      </BaseButton>
+    </header>
+
+    <BaseInput
+      id="search"
+      v-model="search"
+      type="search"
+      label="Поиск по преподавателю"
+      placeholder="Например, Иванов"
+      autocomplete="off"
+      class="search"
+    />
+
+    <div v-if="isLoading && items.length === 0" class="state loading">Загрузка…</div>
+    <div v-else-if="error" class="state error">
+      <p>{{ error }}</p>
+      <BaseButton variant="secondary" size="sm" @click="load">Повторить</BaseButton>
+    </div>
+    <div v-else-if="items.length === 0" class="state empty">
+      {{ search.trim() ? 'Ничего не найдено' : 'Пока нет ни одной записи' }}
+    </div>
+    <ul v-else class="items-list" :class="{ 'items-list--stale': isLoading }">
+      <CourseCard v-for="item in items" :key="item.id" :course="item" />
     </ul>
   </div>
 </template>
 
 <style scoped>
+.page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 0.5rem;
+}
+.search {
+  max-width: 360px;
+}
+/* Адаптивная сетка без медиа-запросов: столько колонок по 240px, сколько влезет. */
+.items-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 1rem;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  transition: opacity 0.15s ease;
+}
+.items-list--stale {
+  opacity: 0.6;
+}
 .state {
-  padding: 1rem;
+  padding: 2rem 1rem;
   text-align: center;
 }
 .state.error {
-  color: #c00;
-}
-.items-list {
-  list-style: none;
-  padding: 0;
-}
-.item-card {
-  border: 1px solid #ddd;
-  border-radius: 8px;
-  padding: 1rem;
-  margin-bottom: 0.5rem;
-  background: #fff;
-}
-.item-card h3 {
-  margin: 0 0 0.25rem;
-}
-.description {
-  margin: 0 0 0.5rem;
-}
-.meta {
-  display: flex;
-  justify-content: space-between;
-  margin: 0;
-  color: #666;
-  font-size: 0.9rem;
+  color: var(--color-danger, #c53030);
 }
 </style>

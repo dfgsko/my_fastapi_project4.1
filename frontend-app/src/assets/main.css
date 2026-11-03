@@ -1,21 +1,52 @@
+/* Дизайн-токены (лаб. № 7): компоненты берут цвета, радиусы и тени отсюда,
+   поэтому тему меняют в одном месте. В компонентах у var() есть запасные
+   значения — компонент работает и без этого файла (например, в тестах). */
 :root {
+  --color-primary: #2b6cb0;
+  --color-primary-hover: #2c5282;
+  --color-secondary: #e2e8f0;
+  --color-secondary-hover: #cbd5e0;
+  --color-danger: #c53030;
+  --color-danger-hover: #9b2c2c;
+  --color-success: #2f855a;
+  --color-info: #2b6cb0;
+  --color-text: #1a202c;
+  --color-muted: #4a5568;
+  --color-border: #cbd5e0;
+  --color-surface: #ffffff;
+  --color-background: #f7fafc;
+  --focus-ring: 0 0 0 3px rgba(43, 108, 176, 0.35);
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.06), 0 1px 3px rgba(0, 0, 0, 0.1);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.12);
+
   font-family:
     system-ui,
     -apple-system,
     'Segoe UI',
     Roboto,
     sans-serif;
-  color: #222;
-  background: #fafafa;
+  color: var(--color-text);
+  background: var(--color-background);
 }
 body {
   margin: 0;
 }
 main {
-  max-width: 800px;
+  max-width: 960px;
   margin: 0 auto;
   padding: 1rem;
 }
 a {
-  color: #2a6df4;
+  color: var(--color-primary);
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
 }
