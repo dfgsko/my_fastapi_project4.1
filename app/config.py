@@ -168,7 +168,20 @@ def admin_bootstrap() -> tuple[str, str]:
     return _env("ADMIN_BOOTSTRAP_USERNAME"), _env("ADMIN_BOOTSTRAP_PASSWORD")
 
 
+DEV_CORS_ORIGINS = ["http://localhost:5173", "http://127.0.0.1:5173"]
+
+
 def cors_origins() -> list[str]:
+    """
+    Разрешённые origin'ы CORS. Всегда явный список, никогда "*".
+
+    Если CORS_ORIGINS не задана вообще и окружение development, разрешаются
+    адреса dev-сервера Vite (лаб. № 6: фронтенд на npm run dev → :5173).
+    Явная пустая строка (как в k8s/01-configmap.yaml) отключает CORS: в кластере
+    фронтенд будет отдаваться с того же origin (следующая лабораторная).
+    """
+    if "CORS_ORIGINS" not in os.environ and environment() == "development":
+        return list(DEV_CORS_ORIGINS)
     return [o.strip() for o in _env("CORS_ORIGINS").split(",") if o.strip()]
 
 

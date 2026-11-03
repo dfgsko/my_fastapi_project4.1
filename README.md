@@ -1,13 +1,14 @@
 # Educational Platform API — Курсы, студенты и зачисления
 
-Вариант 8 («Курсы и студенты»). Проект прошёл пять лабораторных работ:
+Вариант 8 («Курсы и студенты»). Проект прошёл шесть лабораторных работ:
 
 | Лаб. | Что сделано | Где описано |
 |------|-------------|-------------|
 | №1–2 | REST API на FastAPI, SQLAlchemy, кэш и rate limiting в Redis, Celery-задача генерации сертификатов, админ-панель | [docs/LAB1-2.md](docs/LAB1-2.md) (эндпоинты, модель данных, примеры запросов) |
 | №3 | PostgreSQL, RabbitMQ, Kubernetes (Minikube), Helm umbrella-чарт, KEDA, CloudNativePG, Argo CD, Image Updater, GitHub Actions | разделы «Kubernetes» … «CI» ниже |
 | №4 | Наблюдаемость и S3: Prometheus, Grafana, Alertmanager, Loki, Alloy, Flower, SeaweedFS (S3 API) | раздел «Лабораторная № 4» ниже |
-| **№5** | **Безопасность: JWT и роли, защита от BOLA, Vault, NetworkPolicy, Pod Security, TLS (cert-manager), Kyverno, Falco, Trivy** | раздел «Лабораторная № 5» ниже |
+| №5 | Безопасность: JWT и роли, защита от BOLA, Vault, NetworkPolicy, Pod Security, TLS (cert-manager), Kyverno, Falco, Trivy | раздел «Лабораторная № 5» ниже |
+| **№6** | **MVP-фронтенд на Vue 3: вход по JWT, главный экран со списком курсов, маршрутизация** | раздел «Лабораторная № 6» ниже и `frontend-app/README.md` |
 
 ## Архитектура
 
@@ -435,6 +436,25 @@ aws --endpoint-url http://localhost:8333 s3 ls s3://fastapi-files        # (AWS_
 | `celery_queue_length` отсутствует | API не достаёт RabbitMQ или очередь `celery` ещё не создана (воркер не запускался) |
 | Pod Prometheus/Loki `Pending` | не хватает ресурсов Minikube: `minikube start --cpus=4 --memory=8192` |
 
+## Лабораторная № 6: MVP-фронтенд на Vue.js
+
+SPA в каталоге `frontend-app/` (Vue 3, Vite, Pinia, Vue Router, Axios, Vitest). Фронтенд запускается на компьютере
+через `npm run dev` (`http://localhost:5173`) и работает с бэкендом на `http://localhost:8000`. Подробная инструкция,
+переменные окружения, сквозной сценарий со скриншотами и решение проблем — в [`frontend-app/README.md`](frontend-app/README.md).
+
+```bash
+# бэкенд (терминал 1)
+export DATABASE_URL=sqlite+aiosqlite:///./app.db ADMIN_BOOTSTRAP_USERNAME=admin ADMIN_BOOTSTRAP_PASSWORD=ChangeMe-Admin-2026
+uvicorn app.main:app --reload
+python scripts/seed_demo.py                       # демо-курсы и пользователь student / Student-passw0rd
+# фронтенд (терминал 2)
+cd frontend-app && npm install && cp .env.example .env.local && npm run dev
+```
+
+Изменения бэкенда: CORS по умолчанию разрешает dev-сервер Vite (`http://localhost:5173`, `http://127.0.0.1:5173`) при
+`ENVIRONMENT=development`, если `CORS_ORIGINS` не задана; пустая строка (как в Kubernetes) CORS выключает, `"*"` не используется.
+Добавлены `scripts/seed_demo.py` и тесты CORS (`app/tests/test_cors.py`).
+
 ## Лабораторная № 5: безопасность и защита данных
 
 > **С этой работы API закрыт авторизацией.** Примеры `curl` из разделов выше выполняйте с заголовком
@@ -641,7 +661,7 @@ Let's Encrypt не выдаёт сертификаты на `fastapi.local`: д�
 
 ## CI (GitHub Actions)
 
-`.github/workflows/ci.yml`: `pytest` → `helm lint` + `helm template` (в т.ч. без SeaweedFS и мониторинга) →
+`.github/workflows/ci.yml`: `pytest` и `frontend` (линтеры, Vitest, сборка Vue) → `helm lint` + `helm template` (в т.ч. без SeaweedFS и мониторинга) →
 `observability-validate` (kustomize build, kubeconform, `alloy validate`, актуальность дашбордов) → сборка и публикация
 образов в GHCR (теги: `sha-…` и `vX.Y.Z` при `git tag`). Деплоя в кластер нет: это задача Argo CD (pull-модель,
 kubeconfig в CI не нужен). Вариант из методички (шаг «Deploy monitoring stack» в CI) оформлен отдельным ручным
@@ -656,6 +676,7 @@ workflow `.github/workflows/deploy-monitoring.yml` — он нужен толь�
 ├── k8s/                     # «сырые» манифесты; cnpg/, keda/, ingress/, seaweedfs/, monitoring/ — отдельно
 ├── monitoring/              # values kube-prometheus-stack / Loki / Alloy, Grafana: datasource, дашборды (лаб. №4)
 ├── security/                # Kyverno, Falco, Vault, cert-manager (лаб. №5)
+├── frontend-app/            # SPA на Vue 3 + Vite (лаб. №6)
 ├── helm/                    # fastapi-platform (umbrella) и postgres-cluster (CNPG)
 ├── argocd/                  # Application, ApplicationSet (Git dir / Matrix), values Argo CD и Image Updater
 ├── environments/            # dev / staging / prod values для GitOps

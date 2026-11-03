@@ -1,0 +1,22 @@
+import { fileURLToPath, URL } from 'node:url'
+
+import { defineConfig } from 'vite'
+import vue from '@vitejs/plugin-vue'
+import vueDevTools from 'vite-plugin-vue-devtools'
+
+// https://vite.dev/config/
+export default defineConfig({
+  plugins: [vue(), vueDevTools()],
+  resolve: {
+    alias: {
+      '@': fileURLToPath(new URL('./src', import.meta.url)),
+    },
+  },
+  server: {
+    host: 'localhost',
+    port: 5173,
+    // Порт 5173 прописан в CORS бэкенда. Если он занят, Vite по умолчанию
+    // молча выберет 5174 — и браузер заблокирует все запросы к API.
+    strictPort: true,
+  },
+})
