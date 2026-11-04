@@ -18,6 +18,17 @@ COPY --chown=appuser:appuser app/ ./app/
 COPY --chown=appuser:appuser migrations/ ./migrations/
 COPY --chown=appuser:appuser alembic.ini ./
 RUN mkdir -p /app/certificates && chown appuser:appuser /app/certificates
+# Инструменты сборки (pip, setuptools, wheel) во время работы не нужны.
+# setuptools из базового образа содержит старые встроенные копии
+# jaraco.context и wheel с HIGH-уязвимостями (CVE-2026-23949, CVE-2026-24049),
+# из-за них падала проверка Trivy. Убираем их из итогового образа.
+RUN python -m pip uninstall -y pip setuptools wheel \
+ && rm -rf /usr/local/lib/python3.11/site-packages/setuptools* \
+           /usr/local/lib/python3.11/site-packages/wheel* \
+           /usr/local/lib/python3.11/site-packages/pip* \
+           /usr/local/lib/python3.11/site-packages/_distutils_hack \
+           /usr/local/lib/python3.11/site-packages/distutils-precedence.pth \
+           /usr/local/bin/pip*
 USER 1000:1000
 ENV PATH=/home/appuser/.local/bin:$PATH \
     PYTHONUNBUFFERED=1 \
