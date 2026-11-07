@@ -15,7 +15,8 @@ export async function makeRouter(path = '/') {
 
 /**
  * Монтирует компонент с роутером и тестовой Pinia.
- * role: null (гость) | 'user' | 'admin' — состояние auth-store.
+ * role: null (гость) | 'client' | 'moderator' | 'admin' — состояние auth-store.
+ * ('user' из лаб. № 6–7 считается клиентом.)
  */
 export async function mountView(component, { props = {}, path = '/', role = 'admin' } = {}) {
   const router = await makeRouter(path)
@@ -29,7 +30,10 @@ export async function mountView(component, { props = {}, path = '/', role = 'adm
         createTestingPinia({
           createSpy: vi.fn,
           initialState: {
-            auth: role ? { token: 'jwt', user: { username: 'tester', role } } : { token: null },
+            auth: {
+              initialized: true,
+              user: role ? { username: 'tester', role: role === 'user' ? 'client' : role } : null,
+            },
           },
         }),
       ],

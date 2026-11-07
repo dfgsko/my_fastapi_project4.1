@@ -7,104 +7,117 @@ import apiClient from '@/api/client'
 const { push } = vi.hoisted(() => ({ push: vi.fn() }))
 vi.mock('@/api/client')
 vi.mock('vue-router', () => ({
-  useRouter: () => ({ push }),
+  useRouter: () => ({ push, currentRoute: { value: { query: {}, meta: {} } } }),
 }))
 
-describe('Auth Store', () => {
+const ME = { id: 1, username: 'anna', role: 'client', display_name: 'Анна' }
+
+describe('Auth Store (лаб. № 8: сессия в httpOnly cookie)', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     localStorage.clear()
     vi.clearAllMocks()
   })
 
-  it('login сохраняет токен и перенаправляет', async () => {
-    const fakeToken = 'fake-jwt-token'
-    apiClient.post.mockResolvedValue({ data: { access_token: fakeToken } })
-
+  it('login отправляет form-urlencoded, берёт профиль из ответа и перенаправляет', async () => {
+    apiClient.post.mockResolvedValue({ data: { message: 'Logged in', user: ME } })
     const store = useAuthStore()
-    await store.login('user', 'pass')
+    const result = await store.login('anna', 's3cret&=')
 
     expect(apiClient.post).toHaveBeenCalledWith('/auth/token', expect.any(URLSearchParams), {
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     })
-    expect(store.token).toBe(fakeToken)
-    expect(localStorage.getItem('access_token')).toBe(fakeToken)
+    const body = apiClient.post.mock.calls[0][1]
+    expect(body.get('username')).toBe('anna')
+    expect(body.get('password')).toBe('s3cret&=') // спецсимволы кодируются корректно
+    expect(result).toEqual({ twoFactor: false })
+    expect(store.user).toEqual(ME)
     expect(store.isAuthenticated).toBe(true)
     expect(push).toHaveBeenCalledWith('/')
   })
 
-  it('login отправляет поля username и password в теле form-urlencoded', async () => {
-    apiClient.post.mockResolvedValue({ data: { access_token: 't' } })
-    await useAuthStore().login('anna', 's3cret&=')
-
-    const body = apiClient.post.mock.calls[0][1]
-    expect(body.get('username')).toBe('anna')
-    expect(body.get('password')).toBe('s3cret&=') // спецсимволы кодируются корректно
-    expect(body.toString()).toContain('username=anna')
+  it('токены нигде в JS не сохраняются', async () => {
+    apiClient.post.mockResolvedValue({ data: { message: 'Logged in', user: ME } })
+    await useAuthStore().login('anna', 'p')
+    expect(localStorage.length).toBe(0)
+    expect(sessionStorage.length).toBe(0)
+    expect(Object.keys(useAuthStore().$state)).not.toContain('token')
   })
 
-  it('неудачный login не сохраняет токен и не перенаправляет', async () => {
-    apiClient.post.mockRejectedValue({ response: { status: 401 } })
+  it('при включённой 2FA login возвращает temp_token и НЕ входит', async () => {
+    apiClient.post.mockResolvedValue({ data: { '2fa_required': true, temp_token: 'tmp' } })
     const store = useAuthStore()
-
-    await expect(store.login('user', 'bad')).rejects.toBeTruthy()
-
-    expect(store.token).toBeNull()
+    const result = await store.login('anna', 'p')
+    expect(result).toEqual({ twoFactor: true, tempToken: 'tmp' })
     expect(store.isAuthenticated).toBe(false)
-    expect(localStorage.getItem('access_token')).toBeNull()
     expect(push).not.toHaveBeenCalled()
   })
 
-  it('logout очищает токен и localStorage и ведёт на /login', () => {
-    localStorage.setItem('access_token', 'fake')
+  it('verifyTwoFactor отправляет temp_token и код, затем входит', async () => {
+    apiClient.post.mockResolvedValue({ data: { message: 'Logged in', user: ME } })
     const store = useAuthStore()
-    store.token = 'fake'
+    await store.verifyTwoFactor('tmp', '123456')
+    expect(apiClient.post).toHaveBeenCalledWith('/auth/2fa/verify', {
+      temp_token: 'tmp',
+      code: '123456',
+    })
+    expect(store.isAuthenticated).toBe(true)
+  })
 
-    store.logout()
-
-    expect(store.token).toBeNull()
+  it('неудачный login не входит и не перенаправляет', async () => {
+    apiClient.post.mockRejectedValue({ response: { status: 401 } })
+    const store = useAuthStore()
+    await expect(store.login('user', 'bad')).rejects.toBeTruthy()
     expect(store.isAuthenticated).toBe(false)
-    expect(localStorage.getItem('access_token')).toBeNull()
+    expect(push).not.toHaveBeenCalled()
+  })
+
+  it('init восстанавливает сессию по cookie через /auth/me (один раз)', async () => {
+    apiClient.get.mockResolvedValue({ data: ME })
+    const store = useAuthStore()
+    await Promise.all([store.init(), store.init()])
+    await store.init()
+    expect(apiClient.get).toHaveBeenCalledTimes(1)
+    expect(apiClient.get).toHaveBeenCalledWith('/auth/me')
+    expect(store.isAuthenticated).toBe(true)
+    expect(store.initialized).toBe(true)
+  })
+
+  it('init без сессии: гость, но initialized = true', async () => {
+    apiClient.get.mockRejectedValue({ response: { status: 401 } })
+    const store = useAuthStore()
+    await store.init()
+    expect(store.isAuthenticated).toBe(false)
+    expect(store.initialized).toBe(true)
+  })
+
+  it('logout вызывает POST /auth/logout, сбрасывает профиль и ведёт на /login', async () => {
+    apiClient.post.mockResolvedValue({})
+    const store = useAuthStore()
+    store.user = ME
+    await store.logout()
+    expect(apiClient.post).toHaveBeenCalledWith('/auth/logout')
+    expect(store.user).toBeNull()
     expect(push).toHaveBeenCalledWith('/login')
   })
 
-  it('при создании читает токен из localStorage (сессия переживает перезагрузку)', () => {
-    localStorage.setItem('access_token', 'saved-token')
+  it('logout работает, даже если сервер недоступен', async () => {
+    apiClient.post.mockRejectedValue(new Error('Network Error'))
     const store = useAuthStore()
-    expect(store.token).toBe('saved-token')
-    expect(store.isAuthenticated).toBe(true)
-  })
-
-  it('без сохранённого токена пользователь не авторизован', () => {
-    expect(useAuthStore().isAuthenticated).toBe(false)
-  })
-
-  it('login запрашивает /auth/me и определяет роль администратора', async () => {
-    apiClient.post.mockResolvedValue({ data: { access_token: 't' } })
-    apiClient.get.mockResolvedValue({ data: { username: 'admin', role: 'admin' } })
-    const store = useAuthStore()
-    await store.login('admin', 'p')
-    expect(apiClient.get).toHaveBeenCalledWith('/auth/me')
-    expect(store.user.role).toBe('admin')
-    expect(store.isAdmin).toBe(true)
-  })
-
-  it('сбой /auth/me не мешает входу: пользователь вошёл, роль неизвестна', async () => {
-    apiClient.post.mockResolvedValue({ data: { access_token: 't' } })
-    apiClient.get.mockRejectedValue(new Error('Network Error'))
-    const store = useAuthStore()
-    await store.login('u', 'p')
-    expect(store.isAuthenticated).toBe(true)
-    expect(store.isAdmin).toBe(false)
-  })
-
-  it('logout сбрасывает и данные пользователя', () => {
-    const store = useAuthStore()
-    store.token = 't'
-    store.user = { role: 'admin' }
-    store.logout()
+    store.user = ME
+    await store.logout()
     expect(store.user).toBeNull()
-    expect(store.isAdmin).toBe(false)
+  })
+
+  it.each([
+    ['client', false, false],
+    ['moderator', true, false],
+    ['admin', true, true],
+  ])('роль %s: canManageContent=%s, isAdmin=%s', (role, canManage, admin) => {
+    const store = useAuthStore()
+    store.user = { ...ME, role }
+    expect(store.canManageContent).toBe(canManage)
+    expect(store.isAdmin).toBe(admin)
   })
 
   it.each([

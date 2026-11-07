@@ -1,0 +1,65 @@
+/* Общий стиль карточек вкладки «Безопасность». */
+.security-card {
+  border: 1px solid var(--color-border, #e2e8f0);
+  border-radius: 12px;
+  padding: 1.25rem 1.5rem;
+  background: var(--color-surface, #fff);
+}
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+.card-header h3 {
+  margin: 0 0 0.25rem;
+}
+.badge-on {
+  color: var(--color-success, #2f855a);
+  font-weight: 600;
+}
+.badge-off {
+  color: var(--color-danger, #c53030);
+  font-weight: 600;
+}
+.muted {
+  color: var(--color-muted, #718096);
+  font-size: 0.875rem;
+  margin: 0;
+}
+.description {
+  margin-top: 0.75rem;
+}
+.email {
+  margin: 0.5rem 0 0;
+  font-family: ui-monospace, monospace;
+}
+.error {
+  color: var(--color-danger, #c53030);
+  margin: 0.5rem 0 0;
+}
+.qr {
+  display: block;
+  margin: 1rem auto;
+  width: 200px;
+  height: 200px;
+  image-rendering: pixelated;
+  background: #fff;
+  padding: 6px;
+  border-radius: 6px;
+}
+.secret {
+  word-break: break-all;
+}
+.codes {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.35rem 1rem;
+  padding: 0.75rem 1rem;
+  margin: 0.75rem 0;
+  border-radius: 6px;
+  background: var(--color-background, #f7fafc);
+  font-family: ui-monospace, monospace;
+  list-style: none;
+}

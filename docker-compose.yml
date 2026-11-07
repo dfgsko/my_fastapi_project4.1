@@ -8,6 +8,7 @@
 #   Prometheus: тот же профиль → http://127.0.0.1:9090 (цели: api, flower)
 #   SeaweedFS S3: http://127.0.0.1:8333 (ключи — docker/seaweedfs-s3.json)
 #   Метрики API: http://127.0.0.1:8000/metrics
+#   Mailpit (письма подтверждения email, лаб. № 8): http://127.0.0.1:8025
 
 x-app-env: &app-env
   DATABASE_URL: postgresql+asyncpg://appuser:apppass@db:5432/appdb
@@ -24,8 +25,23 @@ x-app-env: &app-env
   SECRET_KEY: compose-dev-secret-key-change-me-0123456789abcdef
   ADMIN_BOOTSTRAP_USERNAME: admin
   ADMIN_BOOTSTRAP_PASSWORD: ChangeMe-Admin-2026
+  # Аккаунты (лаб. № 8): письма ловит Mailpit (http://127.0.0.1:8025).
+  SMTP_HOST: mailpit
+  SMTP_PORT: "1025"
+  SMTP_STARTTLS: "false"
+  FRONTEND_URL: http://localhost:5173
+  CORS_ORIGINS: http://localhost:5173,http://127.0.0.1:5173
+  TOTP_ENCRYPTION_KEY: compose-dev-totp-key-change-me
+  AGE_ESTIMATOR_BACKEND: mock
 
 services:
+  # Тестовый почтовый сервер: принимает SMTP на 1025 и показывает письма в
+  # веб-интерфейсе — так видно письмо со ссылкой подтверждения email.
+  mailpit:
+    image: axllent/mailpit:v1.33.0
+    ports:
+      - "8025:8025"
+
   db:
     image: postgres:16-alpine
     environment:

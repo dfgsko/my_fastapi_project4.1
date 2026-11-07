@@ -17,7 +17,10 @@ defineProps({ course: { type: Object, required: true } })
     <p class="course-card__description">{{ course.description }}</p>
     <p class="course-card__meta">
       <span>{{ course.instructor }}</span>
-      <span class="badge">{{ course.duration_hours }} ч</span>
+      <span class="badges">
+        <span v-if="course.min_age > 0" class="badge badge--age">{{ course.min_age }}+</span>
+        <span class="badge">{{ course.duration_hours }} ч</span>
+      </span>
     </p>
   </BaseCard>
 </template>
@@ -67,5 +70,13 @@ defineProps({ course: { type: Object, required: true } })
   border-radius: 999px;
   background: var(--color-secondary, #e2e8f0);
   white-space: nowrap;
+}
+.badges {
+  display: inline-flex;
+  gap: 0.35rem;
+}
+.badge--age {
+  background: var(--color-danger, #c53030) !important;
+  color: #fff !important;
 }
 </style>

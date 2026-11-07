@@ -36,7 +36,7 @@ describe('CourseCreateView', () => {
     await wrapper.find('form').trigger('submit')
     await flushPromises()
 
-    expect(apiClient.post).toHaveBeenCalledWith('/courses', VALID)
+    expect(apiClient.post).toHaveBeenCalledWith('/courses', { ...VALID, min_age: 0 })
     expect(useToast().toasts.value[0].message).toBe('Курс «Docker» создан')
     expect(result.push).toHaveBeenCalledWith({ name: 'course-detail', params: { id: 42 } })
   })
@@ -87,7 +87,11 @@ describe('CourseEditView', () => {
     await wrapper.find('form').trigger('submit')
     await flushPromises()
 
-    expect(apiClient.put).toHaveBeenCalledWith('/courses/7', { ...VALID, title: 'Docker 2' })
+    expect(apiClient.put).toHaveBeenCalledWith('/courses/7', {
+      ...VALID,
+      title: 'Docker 2',
+      min_age: 0,
+    })
     expect(useToast().toasts.value[0].message).toBe('Изменения сохранены')
     expect(push).toHaveBeenCalledWith({ name: 'course-detail', params: { id: '7' } })
   })

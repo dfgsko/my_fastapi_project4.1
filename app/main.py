@@ -29,7 +29,9 @@ from app.config import docs_enabled
 from app.metrics import setup_metrics
 from app.routers import (
     admin,
+    age_verification,
     auth,
+    auth_2fa,
     courses,
     enrollments,
     files,
@@ -38,6 +40,7 @@ from app.routers import (
     users,
 )
 from app.security import setup_security
+from app.sessions import setup_csrf
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -68,9 +71,9 @@ app = FastAPI(
         "REST API для образовательной платформы: курсы, студенты и "
         "зачисления, с кэшированием (Redis), rate limiting, фоновой "
         "генерацией сертификатов (Celery), файлами в S3 (SeaweedFS) и "
-        "метриками Prometheus (/metrics). Доступ — по JWT (роли admin/user)."
+        "метриками Prometheus (/metrics). Доступ — по JWT в httpOnly cookie, 2FA (TOTP), роли client/moderator/admin."
     ),
-    version="5.0.0",
+    version="8.0.0",
     lifespan=lifespan,
     # В production документацию API можно скрыть: DOCS_ENABLED=false.
     docs_url="/docs" if docs_enabled() else None,
@@ -80,6 +83,8 @@ app = FastAPI(
 
 app.include_router(health.router)
 app.include_router(auth.router)
+app.include_router(auth_2fa.router)
+app.include_router(age_verification.router)
 app.include_router(users.router)
 app.include_router(courses.router)
 app.include_router(students.router)
@@ -91,9 +96,14 @@ app.include_router(files.router)
 setup_metrics(app)
 
 # Заголовки безопасности, Host/CORS, закрытие /metrics от Ingress (лаб. № 5).
+# CSRF (double-submit) для запросов с cookie-аутентификацией (лаб. № 8).
+# Добавляется раньше CORS: Starlette оборачивает в обратном порядке, и ответ
+# 403 от CSRF тоже получит CORS- и security-заголовки.
+setup_csrf(app)
+
 setup_security(app)
 
 
 @app.get("/", tags=["health"], summary="Проверка работоспособности сервера")
 def root() -> dict:
-    return {"status": "ok", "service": "Educational Platform API", "version": "5.0.0"}
+    return {"status": "ok", "service": "Educational Platform API", "version": "8.0.0"}

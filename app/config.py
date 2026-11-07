@@ -156,7 +156,7 @@ def bcrypt_rounds() -> int:
 
 
 def password_min_length() -> int:
-    return int(_env("PASSWORD_MIN_LENGTH", "10"))
+    return int(_env("PASSWORD_MIN_LENGTH", "12"))  # ≥ 12 (лаб. № 8)
 
 
 def auth_rate_limit() -> tuple[int, int]:
@@ -206,3 +206,126 @@ def registration_enabled() -> bool:
 def docs_enabled() -> bool:
     """Swagger/OpenAPI в production лучше скрывать (OWASP API9: инвентаризация)."""
     return _env("DOCS_ENABLED", "true").lower() == "true"
+
+
+# ---------------------------------------------------------------------------
+# Аккаунты, 2FA, сессии на cookies, email и возраст (лабораторная № 8)
+# ---------------------------------------------------------------------------
+
+
+def _bool(name: str, default: str) -> bool:
+    return _env(name, default).lower() == "true"
+
+
+def cookie_secure() -> bool:
+    """
+    Флаг Secure у cookie. В production/staging — всегда True (только HTTPS).
+    Локально на http://localhost браузер не сохранил бы Secure-cookie, поэтому
+    по умолчанию для development — False (COOKIE_SECURE переопределяет).
+    """
+    if "COOKIE_SECURE" in os.environ:
+        return _bool("COOKIE_SECURE", "false")
+    return environment() in _PROD_ENVS
+
+
+def cookie_samesite() -> str:
+    value = _env("COOKIE_SAMESITE", "strict").lower()
+    if value not in ("strict", "lax"):
+        # SameSite=None требует Secure и отключает защиту от CSRF — запрещаем.
+        raise RuntimeError(f"Недопустимый COOKIE_SAMESITE: {value!r}")
+    return value
+
+
+def two_factor_temp_token_minutes() -> int:
+    """Срок жизни temp_token между вводом пароля и вводом кода 2FA."""
+    return int(_env("TWO_FACTOR_TEMP_TOKEN_MINUTES", "5"))
+
+
+def registration_token_minutes() -> int:
+    """Срок жизни токена незавершённой регистрации (шаг проверки возраста)."""
+    return int(_env("REGISTRATION_TOKEN_MINUTES", "30"))
+
+
+def totp_issuer() -> str:
+    return _env("TOTP_ISSUER", "Educational Platform")
+
+
+def totp_encryption_key() -> str:
+    """
+    Ключ шифрования секретов TOTP в БД. Отдельный ключ лучше (его можно
+    ротировать независимо от ключа JWT); если не задан, ключ выводится из
+    SECRET_KEY, чтобы локальный запуск работал без дополнительной настройки.
+    """
+    return _env("TOTP_ENCRYPTION_KEY") or get_secret_key()
+
+
+def frontend_url() -> str:
+    """Адрес SPA: из него строится ссылка в письме подтверждения."""
+    return _env("FRONTEND_URL", "http://localhost:5173").rstrip("/")
+
+
+def email_verification_required() -> bool:
+    """Блокировать вход до подтверждения email (EMAIL_VERIFICATION_REQUIRED)."""
+    return _bool("EMAIL_VERIFICATION_REQUIRED", "true")
+
+
+def email_token_hours() -> int:
+    return int(_env("EMAIL_VERIFICATION_TOKEN_HOURS", "24"))
+
+
+def email_resend_cooldown_seconds() -> int:
+    return int(_env("EMAIL_RESEND_COOLDOWN_SECONDS", "60"))
+
+
+def smtp_settings() -> dict:
+    """
+    SMTP для писем. Пустой SMTP_HOST — «режим разработки»: письмо не
+    отправляется, а ссылка пишется в лог воркера (удобно без почтового
+    сервера). В docker-compose письма ловит Mailpit (http://localhost:8025).
+    """
+    return {
+        "host": _env("SMTP_HOST"),
+        "port": int(_env("SMTP_PORT", "587")),
+        "user": _env("SMTP_USER"),
+        "password": _env("SMTP_PASSWORD"),
+        "from": _env("SMTP_FROM", "no-reply@edu-platform.local"),
+        "starttls": _bool("SMTP_STARTTLS", "true"),
+    }
+
+
+def age_verification_enabled() -> bool:
+    """Есть ли в системе проверка возраста вообще (контент 18+)."""
+    return _bool("AGE_VERIFICATION_ENABLED", "true")
+
+
+def age_verification_on_registration() -> bool:
+    """
+    Спрашивать возраст сразу после регистрации (до отправки письма). Если
+    в системе нет контента 18+, требование можно выключить.
+    """
+    return age_verification_enabled() and _bool("AGE_VERIFICATION_ON_REGISTRATION", "true")
+
+
+def age_minimum() -> int:
+    return int(_env("AGE_MINIMUM", "18"))
+
+
+def age_estimator_backend() -> str:
+    """
+    betterageverify — локальная библиотека BetterAgeVerify (нужны torch и
+    веса моделей); mock — демо-оценщик для разработки и тестов.
+    """
+    return _env("AGE_ESTIMATOR_BACKEND", "mock").lower()
+
+
+def age_min_confidence() -> float:
+    """Ниже этой уверенности модели результат не принимается (повторить фото)."""
+    return float(_env("AGE_MIN_CONFIDENCE", "0.5"))
+
+
+def avatar_max_bytes() -> int:
+    return int(_env("AVATAR_MAX_BYTES", str(5 * 1024 * 1024)))
+
+
+def username_change_cooldown_days() -> int:
+    return int(_env("USERNAME_CHANGE_COOLDOWN_DAYS", "180"))

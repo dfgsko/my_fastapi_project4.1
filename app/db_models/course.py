@@ -19,6 +19,9 @@ class Course(Base):
     description: Mapped[str] = mapped_column(Text, nullable=False)
     instructor: Mapped[str] = mapped_column(String(200), nullable=False, index=True)
     duration_hours: Mapped[int] = mapped_column(Integer, nullable=False)
+    # Возрастное ограничение (лаб. № 8): 0 — для всех, 18 — только для
+    # пользователей с подтверждённым возрастом. Фильтрация — на бэкенде.
+    min_age: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
 
     # Связь Many-to-Many со студентами через промежуточную таблицу
     # enrollments (association object — хранит дату зачисления и оценку).

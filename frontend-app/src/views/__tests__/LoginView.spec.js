@@ -48,22 +48,22 @@ describe('LoginView', () => {
 
     const button = wrapper.find('button[type="submit"]')
     expect(button.attributes('disabled')).toBeDefined()
-    expect(button.text()).toBe('Logging in…')
+    expect(button.text()).toBe('Входим…')
 
     finish()
     await flushPromises()
     expect(button.attributes('disabled')).toBeUndefined()
-    expect(button.text()).toBe('Login')
+    expect(button.text()).toBe('Войти')
   })
 
-  it('показывает «Invalid username or password» при 401', async () => {
+  it('показывает «Неверный логин или пароль» при 401', async () => {
     const { wrapper, store } = mountView()
     store.login.mockRejectedValue({ response: { status: 401 } })
 
     await fillAndSubmit(wrapper)
     await flushPromises()
 
-    expect(wrapper.find('.error').text()).toBe('Invalid username or password')
+    expect(wrapper.find('.error').text()).toBe('Неверный логин или пароль')
     expect(wrapper.find('button').attributes('disabled')).toBeUndefined()
   })
 
@@ -105,5 +105,92 @@ describe('LoginView', () => {
     expect(wrapper.find('input#username').attributes('required')).toBeDefined()
     expect(wrapper.find('input#password').attributes('required')).toBeDefined()
     expect(wrapper.find('input#password').attributes('type')).toBe('password')
+  })
+
+  it('email не подтверждён (403): сообщение и ссылка на повторную отправку', async () => {
+    const { wrapper, store } = mountView()
+    store.login.mockRejectedValue({
+      response: {
+        status: 403,
+        data: {
+          detail: 'Email not verified. Please check your inbox.',
+          code: 'email_not_verified',
+        },
+      },
+    })
+    await fillAndSubmit(wrapper)
+    await flushPromises()
+    expect(wrapper.find('.error').text()).toContain('Email not verified')
+    expect(wrapper.find('.error').text()).toContain('Отправить письмо ещё раз')
+  })
+
+  it('не пройдена проверка возраста (403): кнопка «Пройти проверку возраста»', async () => {
+    const { wrapper, store } = mountView()
+    store.login.mockRejectedValue({
+      response: {
+        status: 403,
+        data: { detail: 'Пройдите верификацию', code: 'age_verification_required' },
+      },
+    })
+    await fillAndSubmit(wrapper)
+    await flushPromises()
+    expect(wrapper.find('.error button').text()).toContain('Пройти проверку возраста')
+  })
+})
+
+describe('LoginView: второй шаг 2FA', () => {
+  async function toSecondStep() {
+    const ctx = mountView()
+    ctx.store.login.mockResolvedValue({ twoFactor: true, tempToken: 'tmp-1' })
+    await fillAndSubmit(ctx.wrapper, 'anna', 'pass-1234567')
+    await flushPromises()
+    return ctx
+  }
+
+  it('после пароля показывает поле для 6-значного кода, пароль стирается из формы', async () => {
+    const { wrapper } = await toSecondStep()
+    expect(wrapper.text()).toContain('Двухфакторная аутентификация')
+    const code = wrapper.find('input#code')
+    expect(code.attributes('maxlength')).toBe('6')
+    expect(code.attributes('inputmode')).toBe('numeric')
+    expect(wrapper.find('input#password').exists()).toBe(false)
+  })
+
+  it('отправляет temp_token и код в store.verifyTwoFactor', async () => {
+    const { wrapper, store } = await toSecondStep()
+    await wrapper.find('input#code').setValue('123456')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+    expect(store.verifyTwoFactor).toHaveBeenCalledWith('tmp-1', '123456')
+  })
+
+  it('неверный код (400) — сообщение, остаёмся на шаге кода', async () => {
+    const { wrapper, store } = await toSecondStep()
+    store.verifyTwoFactor.mockRejectedValue({ response: { status: 400 } })
+    await wrapper.find('input#code').setValue('000000')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+    expect(wrapper.find('.error').text()).toContain('Неверный код')
+    expect(wrapper.find('input#code').exists()).toBe(true)
+  })
+
+  it('истёк temp_token (401) — возврат на шаг пароля', async () => {
+    const { wrapper, store } = await toSecondStep()
+    store.verifyTwoFactor.mockRejectedValue({ response: { status: 401 } })
+    await wrapper.find('input#code').setValue('123456')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+    expect(wrapper.find('input#password').exists()).toBe(true)
+    expect(wrapper.find('.error').text()).toContain('Время на ввод кода истекло')
+  })
+
+  it('можно переключиться на код восстановления', async () => {
+    const { wrapper } = await toSecondStep()
+    await wrapper
+      .findAll('button')
+      .find((b) => b.text().includes('Нет доступа'))
+      .trigger('click')
+    expect(wrapper.find('input#code').attributes('maxlength')).toBe('20')
+    expect(wrapper.text()).toContain('Код восстановления')
   })
 })

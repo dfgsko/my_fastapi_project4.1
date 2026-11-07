@@ -12,6 +12,10 @@ export function useResource(endpoint) {
   const isLoading = ref(false)
   const error = ref(null)
   const notFound = ref(false)
+  // Лаб. № 8: заголовки ответа списка (X-Age-Restricted-Hidden) и код ошибки
+  // карточки (X-Error-Code: age_verification_required).
+  const listHeaders = ref({})
+  const errorCode = ref(null)
 
   // Номер последнего запроса списка: если пользователь быстро меняет фильтр,
   // ответ на устаревший запрос не перезапишет более новый.
@@ -22,8 +26,11 @@ export function useResource(endpoint) {
     isLoading.value = true
     error.value = null
     try {
-      const { data } = await apiClient.get(base, { params })
-      if (requestId === listRequest) items.value = data
+      const { data, headers } = await apiClient.get(base, { params })
+      if (requestId === listRequest) {
+        items.value = data
+        listHeaders.value = headers || {}
+      }
     } catch (e) {
       if (requestId === listRequest) error.value = describeError(e, 'Не удалось загрузить данные')
     } finally {
@@ -35,6 +42,7 @@ export function useResource(endpoint) {
     isLoading.value = true
     error.value = null
     notFound.value = false
+    errorCode.value = null
     try {
       const { data } = await apiClient.get(`${base}/${id}`)
       item.value = data
@@ -42,6 +50,7 @@ export function useResource(endpoint) {
     } catch (e) {
       item.value = null
       notFound.value = e.response?.status === 404
+      errorCode.value = e.response?.headers?.['x-error-code'] || null
       error.value = describeError(e, 'Не удалось загрузить запись')
       return null
     } finally {
@@ -76,5 +85,18 @@ export function useResource(endpoint) {
     }
   }
 
-  return { items, item, isLoading, error, notFound, fetchList, fetchOne, create, update, remove }
+  return {
+    items,
+    item,
+    isLoading,
+    error,
+    notFound,
+    errorCode,
+    listHeaders,
+    fetchList,
+    fetchOne,
+    create,
+    update,
+    remove,
+  }
 }

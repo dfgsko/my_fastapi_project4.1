@@ -29,7 +29,7 @@ pip install -r requirements.txt
 export DATABASE_URL=sqlite+aiosqlite:///./app.db
 export ADMIN_BOOTSTRAP_USERNAME=admin ADMIN_BOOTSTRAP_PASSWORD=ChangeMe-Admin-2026
 uvicorn app.main:app --reload           # http://localhost:8000/docs
-python scripts/seed_demo.py             # демо-курсы и пользователь student / Student-passw0rd
+python scripts/seed_demo.py             # демо-курсы, student / Student-passw0rd, moder / Moder-passw0rd-1
 ```
 
 Вариант Б — Docker Compose (PostgreSQL, Redis, RabbitMQ): `docker compose up --build`, затем `python scripts/seed_demo.py`.
@@ -71,7 +71,7 @@ Vite не уйдёт молча на 5174, где бэкенд не разреш
 | Ввести неверный пароль | «Invalid username or password» | `docs/screenshots/02-invalid-password.png` |
 | Ввести верный пароль | редирект на `/`, список курсов из БД | `docs/screenshots/03-home-list.png` |
 | DevTools → Network | `OPTIONS /courses` 200, `GET /courses` 200 с `Authorization: Bearer …` | `docs/screenshots/04-network.png` |
-| Обновить страницу | список остаётся (токен в `localStorage`) | — |
+| Обновить страницу | список остаётся (сессия в httpOnly cookie, профиль из `GET /auth/me`) | — |
 | Создать курс в Swagger и обновить | новый курс в списке | `docs/screenshots/05-new-course.png` |
 | Нажать Logout | редирект на `/login` | `docs/screenshots/06-logout.png` |
 
@@ -85,7 +85,7 @@ Vite не уйдёт молча на 5174, где бэкенд не разреш
 |---------|---------|
 | «Сервер недоступен или запрос заблокирован (CORS)» при входе | бэкенд не запущен, либо фронтенд открыт не с `http://localhost:5173` (CORS), либо `CORS_ORIGINS=""` |
 | В консоли `blocked by CORS policy` | origin фронтенда не в `CORS_ORIGINS`; проверьте порт и `localhost` против `127.0.0.1` |
-| Не редиректит на `/login` | в `localStorage` остался старый `access_token` — удалите его в DevTools → Application |
+| Не редиректит на `/login` | сессия ещё жива (cookie) — нажмите «Выйти» в меню пользователя |
 | После 30 минут перекидывает на `/login` | истёк access-токен (так задумано: refresh-токен в MVP не используется) |
 | «Слишком много попыток входа» | сработал лимит попыток входа бэкенда (лаб. № 5), подождите минуту |
 
@@ -175,6 +175,25 @@ src/
 | Бэкенд остановлен | «Сервер недоступен…» и «Повторить», а не белый экран | ![](../docs/screenshots/lab7/13-backend-down.png) |
 
 Повторить съёмку: запустить бэкенд и `NO_DEVTOOLS=1 npm run dev` (без плавающей панели Vue DevTools).
+
+## Лабораторная № 8: аккаунты, 2FA, сессии и роли
+
+* **Токенов в JS больше нет.** `src/api/client.js` работает с `withCredentials: true`: сессия живёт в httpOnly cookie,
+  к изменяющим запросам добавляется `X-CSRF-Token` из cookie `csrf_token`. На 401 выполняется один общий
+  `POST /auth/refresh` (single-flight, иначе сработала бы защита reuse detection), затем исходный запрос повторяется.
+  Если обновить сессию не удалось, store забывает пользователя и уводит на `/login?redirect=…`.
+* `stores/auth.js`: `init()` восстанавливает сессию через `GET /auth/me`, `login()` возвращает `{ twoFactor, tempToken }`,
+  `verifyTwoFactor()`, computed `canManageContent` (moderator/admin), `isModerator`, `isAdmin`.
+* Маршруты: `/` — `RootView` (гостю `LandingView`, вошедшему `HomeView`), `/register`, `/check-email`, `/verify-email`,
+  `/verify-age`, `/account?tab=profile|settings|security|sessions`, `/moderation`. Мета: `requiresAuth`,
+  `requiresModerator`, `guestOnly`.
+* Аккаунт: `components/account/*` — вкладки и карточки безопасности (`EmailVerificationCard`, `PasswordChangeCard`,
+  `TwoFactorCard` с QR и кодами восстановления, `AgeVerificationCard`), `AvatarUpload`, `UserMenu`, `UserAvatar`.
+* Кнопки «+ Добавить», «Редактировать», «Удалить» видны только модератору и администратору. Клиент видит плашку
+  «Скрыто курсов 18+» и заглушку «Для доступа подтвердите возраст».
+
+Скриншоты сквозного сценария (лендинг → регистрация → письмо в Mailpit → вход → 2FA → сессии → роли):
+[`docs/screenshots/lab8/`](../docs/screenshots/lab8/).
 
 ## Тесты и проверки
 

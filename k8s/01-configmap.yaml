@@ -21,7 +21,7 @@ data:
   ACCESS_TOKEN_EXPIRE_MINUTES: "30"
   REFRESH_TOKEN_EXPIRE_DAYS: "7"
   BCRYPT_ROUNDS: "12"
-  PASSWORD_MIN_LENGTH: "10"
+  PASSWORD_MIN_LENGTH: "12"
   AUTH_RATE_LIMIT_MAX: "10"          # попыток входа на логин за окно
   AUTH_RATE_LIMIT_WINDOW: "60"
   # Допустимые значения заголовка Host. Пробы и /metrics проверку обходят.
@@ -31,3 +31,16 @@ data:
   METRICS_BLOCK_PROXIED: "true"      # /metrics не отдаётся запросам через Ingress
   DOCS_ENABLED: "true"               # в production можно выключить (Swagger/OpenAPI)
   REGISTRATION_ENABLED: "true"
+  # --- Аккаунты, 2FA, cookie-сессии, email, возраст (лаб. № 8) ---
+  COOKIE_SAMESITE: "strict"          # Secure включается сам при ENVIRONMENT=production
+  TOTP_ISSUER: "Educational Platform"
+  FRONTEND_URL: "https://fastapi.local"
+  EMAIL_VERIFICATION_REQUIRED: "true"
+  SMTP_HOST: ""                      # пусто = ссылка подтверждения пишется в лог воркера
+  SMTP_PORT: "587"
+  SMTP_FROM: "no-reply@edu-platform.local"
+  AGE_VERIFICATION_ENABLED: "true"
+  AGE_VERIFICATION_ON_REGISTRATION: "true"
+  AGE_MINIMUM: "18"
+  AGE_MIN_CONFIDENCE: "0.7"
+  AGE_ESTIMATOR_BACKEND: "mock"      # betterageverify — нужен образ с torch и весами

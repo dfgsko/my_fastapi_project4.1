@@ -34,6 +34,14 @@ global:
     username: admin
     password: ChangeMe-Admin-2026   # учебное; в prod — existingSecret
     existingSecret: ""              # Secret с ADMIN_BOOTSTRAP_USERNAME / _PASSWORD
+  # Почта для писем подтверждения (лаб. № 8). Пустой host — ссылка пишется
+  # в лог воркера (удобно в dev). Пароль SMTP — в Secret, не здесь.
+  smtp:
+    host: ""
+    port: 587
+    from: no-reply@edu-platform.local
+  ageVerification:
+    backend: mock                   # mock | betterageverify
   security:
     trustedHosts: ""                # "" → хосты Ingress и Service
     corsOrigins: ""

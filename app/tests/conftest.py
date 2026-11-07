@@ -91,7 +91,13 @@ async def make_user(db_session):
     from app.db_models.student import Student
     from app.db_models.user import User
 
-    async def _make(username: str, role: str = ROLE_USER, with_student: bool = True) -> dict:
+    async def _make(
+        username: str,
+        role: str = ROLE_USER,
+        with_student: bool = True,
+        email_verified: bool = True,
+        age_verified: bool = False,
+    ) -> dict:
         async with db_session() as session:
             student_id = None
             if with_student:
@@ -101,9 +107,12 @@ async def make_user(db_session):
                 student_id = student.id
             user = User(
                 username=username,
+                email=f"{username}@example.com",
                 hashed_password=hash_password(TEST_PASSWORD),
                 role=role,
                 student_id=student_id,
+                is_email_verified=email_verified,
+                is_age_verified=age_verified,
             )
             session.add(user)
             await session.commit()
@@ -122,6 +131,39 @@ async def make_user(db_session):
 @pytest_asyncio.fixture()
 async def admin(make_user):
     return await make_user("admin_test", role="admin", with_student=False)
+
+
+@pytest_asyncio.fixture()
+async def moderator_client(db_session, make_user):
+    """Клиент модератора (роль moderator, лаб. № 8)."""
+    info = await make_user("moder", role="moderator", with_student=False)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(
+        transport=transport, base_url="http://test", headers=info["headers"]
+    ) as ac:
+        ac.info = info
+        yield ac
+
+
+def csrf_headers(client) -> dict:
+    """Заголовок X-CSRF-Token из cookie csrf_token (как делает Axios на фронтенде)."""
+    return {"X-CSRF-Token": client.cookies.get("csrf_token", "")}
+
+
+@pytest.fixture(autouse=True)
+def sent_emails(monkeypatch):
+    """Перехватывает письма подтверждения: список (email, token) вместо SMTP."""
+    from app import tasks
+
+    sent: list[tuple[str, str]] = []
+
+    class _Task:
+        @staticmethod
+        def delay(email, token):
+            sent.append((email, token))
+
+    monkeypatch.setattr(tasks, "send_verification_email", _Task)
+    return sent
 
 
 @pytest_asyncio.fixture()
@@ -148,7 +190,7 @@ async def client(db_session, admin):
 
 @pytest_asyncio.fixture()
 async def user_client(db_session, make_user):
-    """Клиент обычного пользователя (роль user со своим студентом)."""
+    """Клиент обычного пользователя (роль client со своим студентом)."""
     info = await make_user("alice")
     transport = ASGITransport(app=app)
     async with AsyncClient(

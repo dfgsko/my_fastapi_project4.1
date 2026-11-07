@@ -61,7 +61,9 @@ def setup_security(app: FastAPI) -> None:
             h["X-Frame-Options"] = "DENY"
             h["Referrer-Policy"] = "no-referrer"
             h["Permissions-Policy"] = "geolocation=(), camera=(), microphone=()"
-            h["Cross-Origin-Resource-Policy"] = "same-origin"
+            # Эндпоинт может ослабить политику сам (аватар: same-site, чтобы
+            # <img> с фронтенда на соседнем порту/поддомене его загрузил).
+            h.setdefault("Cross-Origin-Resource-Policy", "same-origin")
             if not path.startswith(CSP_EXEMPT):
                 style = " style-src 'unsafe-inline';" if path.startswith("/admin") else ""
                 h["Content-Security-Policy"] = (
@@ -77,7 +79,11 @@ def setup_security(app: FastAPI) -> None:
         app.add_middleware(
             CORSMiddleware,
             allow_origins=origins,  # без "*": явный список
-            allow_credentials=False,  # токены передаются заголовком, не cookie
+            # Лаб. № 8: сессия в httpOnly cookie → браузеру нужно разрешить
+            # отправлять cookie на API (withCredentials). С credentials "*"
+            # запрещён спецификацией — поэтому список origin'ов явный.
+            allow_credentials=True,
             allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
-            allow_headers=["Authorization", "Content-Type"],
+            allow_headers=["Authorization", "Content-Type", "X-CSRF-Token"],
+            expose_headers=["X-Age-Restricted-Hidden", "X-Error-Code", "Retry-After"],
         )

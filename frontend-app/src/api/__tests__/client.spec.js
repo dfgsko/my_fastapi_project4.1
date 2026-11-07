@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import apiClient, { navigation } from '@/api/client'
+import apiClient, { navigation, readCookie, setSessionLostHandler } from '@/api/client'
 
 // Подменяем транспорт Axios: сеть не нужна, интерцепторы выполняются как в браузере.
 function respondWith(handler) {
@@ -17,81 +17,108 @@ function httpError(status) {
     throw error
   }
 }
+const setCookie = (v) => (document.cookie = `csrf_token=${v}; path=/`)
+const clearCookie = () => (document.cookie = 'csrf_token=; max-age=0; path=/')
 
-describe('apiClient', () => {
+describe('apiClient (лаб. № 8: httpOnly cookie + CSRF)', () => {
   beforeEach(() => {
     localStorage.clear()
+    clearCookie()
     history.pushState({}, '', '/')
+    setSessionLostHandler(() => {
+      if (window.location.pathname !== '/login') navigation.toLogin()
+    })
   })
   afterEach(() => vi.restoreAllMocks())
 
-  it('использует базовый URL бэкенда', () => {
+  it('использует базовый URL бэкенда и отправляет cookie (withCredentials)', () => {
     expect(apiClient.defaults.baseURL).toBe('http://localhost:8000')
+    expect(apiClient.defaults.withCredentials).toBe(true)
   })
 
-  it('request interceptor добавляет Authorization: Bearer из localStorage', async () => {
-    localStorage.setItem('access_token', 'abc.def.ghi')
-    const adapter = respondWith(ok)
-
-    await apiClient.get('/courses')
-
-    expect(adapter.mock.calls[0][0].headers.Authorization).toBe('Bearer abc.def.ghi')
-  })
-
-  it('без токена заголовок Authorization не отправляется', async () => {
+  it('никогда не ставит Authorization из localStorage', async () => {
+    localStorage.setItem('access_token', 'abc.def.ghi') // «старый» токен из лаб. № 6
     const adapter = respondWith(ok)
     await apiClient.get('/courses')
     expect(adapter.mock.calls[0][0].headers.Authorization).toBeUndefined()
   })
 
-  it('токен подхватывается на каждый запрос (после логина без пересоздания клиента)', async () => {
+  it('POST/PUT/DELETE получают X-CSRF-Token из cookie, GET — нет', async () => {
+    setCookie('csrf-123')
     const adapter = respondWith(ok)
-    await apiClient.get('/a')
-    localStorage.setItem('access_token', 'new-token')
-    await apiClient.get('/b')
-
-    expect(adapter.mock.calls[0][0].headers.Authorization).toBeUndefined()
-    expect(adapter.mock.calls[1][0].headers.Authorization).toBe('Bearer new-token')
+    await apiClient.get('/courses')
+    await apiClient.post('/courses', {})
+    await apiClient.delete('/courses/1')
+    const headers = adapter.mock.calls.map((c) => c[0].headers['X-CSRF-Token'])
+    expect(headers).toEqual([undefined, 'csrf-123', 'csrf-123'])
   })
 
-  it('при 401 удаляет токен и отправляет на /login', async () => {
-    localStorage.setItem('access_token', 'expired')
+  it('readCookie читает только свою cookie', () => {
+    document.cookie = 'other=1; path=/'
+    setCookie('abc')
+    expect(readCookie('csrf_token')).toBe('abc')
+    expect(readCookie('missing')).toBe('')
+  })
+
+  it('при 401 один раз обновляет сессию и повторяет запрос', async () => {
+    let expired = true
+    const adapter = respondWith((config) => {
+      if (config.url === '/auth/refresh') {
+        expired = false
+        return ok(config)
+      }
+      return expired ? httpError(401)(config) : ok(config)
+    })
+    await expect(apiClient.get('/courses')).resolves.toBeTruthy()
+    expect(adapter.mock.calls.map((c) => c[0].url)).toEqual([
+      '/courses',
+      '/auth/refresh',
+      '/courses',
+    ])
+  })
+
+  it('параллельные 401 → ровно один refresh (иначе сработал бы reuse detection)', async () => {
+    let expired = true
+    const adapter = respondWith(async (config) => {
+      if (config.url === '/auth/refresh') {
+        await new Promise((r) => setTimeout(r, 5))
+        expired = false
+        return ok(config)
+      }
+      return expired ? httpError(401)(config) : ok(config)
+    })
+    await Promise.all([apiClient.get('/a'), apiClient.get('/b'), apiClient.get('/c')])
+    expect(adapter.mock.calls.filter((c) => c[0].url === '/auth/refresh')).toHaveLength(1)
+  })
+
+  it('refresh не удался → отправляет на /login', async () => {
     respondWith(httpError(401))
     const toLogin = vi.spyOn(navigation, 'toLogin').mockImplementation(() => {})
-
     await expect(apiClient.get('/courses')).rejects.toBeTruthy()
-
-    expect(localStorage.getItem('access_token')).toBeNull()
     expect(toLogin).toHaveBeenCalledTimes(1)
   })
 
-  it('при 401 на странице /login не перезагружает страницу (ошибку покажет форма)', async () => {
+  it('401 на /auth/token не запускает refresh (это «неверный пароль»)', async () => {
     history.pushState({}, '', '/login')
-    respondWith(httpError(401))
+    const adapter = respondWith(httpError(401))
     const toLogin = vi.spyOn(navigation, 'toLogin').mockImplementation(() => {})
-
     await expect(apiClient.post('/auth/token')).rejects.toBeTruthy()
-
+    expect(adapter).toHaveBeenCalledTimes(1)
     expect(toLogin).not.toHaveBeenCalled()
   })
 
-  it.each([403, 404, 429, 500])('при %i токен сохраняется и редиректа нет', async (status) => {
-    localStorage.setItem('access_token', 'keep-me')
-    respondWith(httpError(status))
+  it.each([403, 404, 429, 500])('при %i refresh и редиректа нет', async (status) => {
+    const adapter = respondWith(httpError(status))
     const toLogin = vi.spyOn(navigation, 'toLogin').mockImplementation(() => {})
-
     await expect(apiClient.get('/x')).rejects.toBeTruthy()
-
-    expect(localStorage.getItem('access_token')).toBe('keep-me')
+    expect(adapter).toHaveBeenCalledTimes(1)
     expect(toLogin).not.toHaveBeenCalled()
   })
 
-  it('ошибка без ответа (сервер недоступен) пробрасывается, токен не трогаем', async () => {
-    localStorage.setItem('access_token', 'keep-me')
+  it('ошибка без ответа (сервер недоступен) пробрасывается', async () => {
     respondWith(() => {
       throw new Error('Network Error')
     })
     await expect(apiClient.get('/x')).rejects.toThrow('Network Error')
-    expect(localStorage.getItem('access_token')).toBe('keep-me')
   })
 })

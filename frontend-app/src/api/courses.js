@@ -12,7 +12,7 @@ export const coursesApi = {
 }
 
 /** Поля, которые API принимает в POST/PUT. Остальное (id) отбрасывается. */
-export const COURSE_FIELDS = ['title', 'description', 'instructor', 'duration_hours']
+export const COURSE_FIELDS = ['title', 'description', 'instructor', 'duration_hours', 'min_age']
 
 export function toCoursePayload(values) {
   return {
@@ -20,5 +20,7 @@ export function toCoursePayload(values) {
     description: String(values.description ?? '').trim(),
     instructor: String(values.instructor ?? '').trim(),
     duration_hours: values.duration_hours,
+    // 0 — для всех, 18 — только для подтвердивших возраст (лаб. № 8).
+    min_age: Number(values.min_age) > 0 ? 18 : 0,
   }
 }

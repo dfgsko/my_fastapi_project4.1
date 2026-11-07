@@ -19,7 +19,7 @@ data:
   ACCESS_TOKEN_EXPIRE_MINUTES: "30"
   REFRESH_TOKEN_EXPIRE_DAYS: "7"
   BCRYPT_ROUNDS: "12"
-  PASSWORD_MIN_LENGTH: "10"
+  PASSWORD_MIN_LENGTH: "12"
   AUTH_RATE_LIMIT_MAX: "10"
   AUTH_RATE_LIMIT_WINDOW: "60"
   TRUSTED_HOSTS: {{ default (printf "%s,%s-api,%s-api.%s.svc.cluster.local,localhost" (index .Values "fastapi-api" "ingress" "host") .Release.Name .Release.Name .Release.Namespace) .Values.global.security.trustedHosts | quote }}
@@ -27,6 +27,21 @@ data:
   SECURE_HEADERS_ENABLED: "true"
   METRICS_BLOCK_PROXIED: "true"
   DOCS_ENABLED: {{ .Values.global.security.docsEnabled | quote }}
+  # --- Аккаунты, 2FA, cookie-сессии, email, возраст (лаб. № 8) ---
+  # Secure-cookie: в production включается автоматически (ENVIRONMENT).
+  COOKIE_SAMESITE: "strict"
+  TOTP_ISSUER: "Educational Platform"
+  FRONTEND_URL: {{ printf "https://%s" (index .Values "fastapi-api" "ingress" "host") | quote }}
+  EMAIL_VERIFICATION_REQUIRED: "true"
+  SMTP_HOST: {{ .Values.global.smtp.host | quote }}
+  SMTP_PORT: {{ .Values.global.smtp.port | quote }}
+  SMTP_FROM: {{ .Values.global.smtp.from | quote }}
+  AGE_VERIFICATION_ENABLED: "true"
+  AGE_VERIFICATION_ON_REGISTRATION: "true"
+  AGE_MINIMUM: "18"
+  AGE_MIN_CONFIDENCE: "0.7"
+  # mock — демо-оценщик; betterageverify требует образ с torch и весами моделей.
+  AGE_ESTIMATOR_BACKEND: {{ .Values.global.ageVerification.backend | quote }}
   # --- S3 (SeaweedFS) ---
   S3_ENDPOINT: {{ default "http://seaweedfs-s3:8333" .Values.global.s3.endpoint | quote }}
   S3_BUCKET: {{ .Values.global.s3.bucket | quote }}

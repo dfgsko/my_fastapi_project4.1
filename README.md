@@ -69,7 +69,7 @@
 
 ```bash
 pip install -r requirements-dev.txt
-pytest -v          # ~280 тестов: SQLite in-memory, fake Redis, Celery в eager-режиме
+pytest -v          # 344 теста: SQLite in-memory, fake Redis, Celery в eager-режиме
 # С лаб. № 5 API требует JWT — примеры curl с токеном см. «Лабораторная № 5»
 ```
 
@@ -437,6 +437,122 @@ aws --endpoint-url http://localhost:8333 s3 ls s3://fastapi-files        # (AWS_
 | `celery_queue_length` отсутствует | API не достаёт RabbitMQ или очередь `celery` ещё не создана (воркер не запускался) |
 | Pod Prometheus/Loki `Pending` | не хватает ресурсов Minikube: `minikube start --cpus=4 --memory=8192` |
 
+## Лабораторная № 8: аккаунты, 2FA, cookie-сессии и ролевая модель
+
+Публичный лендинг, регистрация с подтверждением email, проверка возраста, вход с двухфакторной аутентификацией (TOTP),
+сессии в httpOnly cookie с ротацией refresh-токенов и ролевая модель **client / moderator / admin**.
+Скриншоты сквозного сценария — [`docs/screenshots/lab8/`](docs/screenshots/lab8/).
+
+### Запуск локально
+
+```bash
+# бэкенд (терминал 1): SQLite + Redis + письма в Mailpit (docker run -p 8025:8025 -p 1025:1025 axllent/mailpit)
+export DATABASE_URL=sqlite+aiosqlite:///./app.db CELERY_TASK_ALWAYS_EAGER=true \
+       SMTP_HOST=127.0.0.1 SMTP_PORT=1025 SMTP_STARTTLS=false \
+       ADMIN_BOOTSTRAP_USERNAME=admin ADMIN_BOOTSTRAP_PASSWORD=ChangeMe-Admin-2026
+python scripts/seed_demo.py           # курсы (один — 18+), student / Student-passw0rd, moder / Moder-passw0rd-1
+uvicorn app.main:app --reload
+# фронтенд (терминал 2)
+cd frontend-app && npm install && npm run dev      # http://localhost:5173
+```
+
+Без `SMTP_HOST` письмо не отправляется, а ссылка подтверждения пишется в лог. В `docker compose up` письма ловит
+Mailpit: http://127.0.0.1:8025.
+
+### Поток регистрации и входа
+
+1. `POST /auth/register` создаёт пользователя с ролью `client`, `is_email_verified=false` и выдаёт короткоживущую
+   cookie `registration_token`. Ответ — `requires_age_verification: true`.
+2. `/verify-age?registration=true`: фото → `POST /auth/verify-age` (или «Пропустить» — тогда курсы 18+ скрыты).
+3. `POST /auth/complete-registration` ставит в очередь Celery задачу `send_verification_email`.
+4. Ссылка из письма → `/verify-email?token=…` → `GET /auth/verify-email` (токен одноразовый, 24 ч, в БД — SHA-256).
+5. `POST /auth/token`: при включённой 2FA ответ `{"2fa_required": true, "temp_token": …}` (JWT `type=2fa_pending`, 5 минут),
+   затем `POST /auth/2fa/verify` с кодом из приложения. Токены — только в cookie.
+
+| Cookie | Флаги | Зачем |
+|--------|-------|-------|
+| `access_token` | HttpOnly, SameSite=Strict, Path=/, 30 мин | JS (и XSS) не может прочитать токен |
+| `refresh_token` | HttpOnly, SameSite=Strict, **Path=/auth/refresh**, 7 дней | уходит только на один эндпоинт |
+| `csrf_token` | SameSite=Strict, читается JS | double-submit: копия в заголовке `X-CSRF-Token` |
+
+`Secure` включается автоматически при `ENVIRONMENT=production` (или `COOKIE_SECURE=true`).
+Каждый `POST /auth/refresh` выдаёт новый refresh-токен и гасит старый. Если предъявлен **уже заменённый** токен
+(его копия у злоумышленника), отзываются все сессии пользователя (reuse detection). Токен, отозванный штатно
+(выход, смена пароля), просто даёт 401 и не трогает остальные сессии.
+`Authorization: Bearer` по-прежнему принимается: для Swagger, curl и тестов (CSRF таким клиентам не нужен).
+
+### Эндпоинты
+
+| Эндпоинт | Назначение |
+|----------|-----------|
+| `POST /auth/register`, `/auth/complete-registration`, `GET /auth/verify-email`, `POST /auth/resend-verification` | регистрация и email |
+| `POST /auth/token`, `/auth/2fa/verify`, `/auth/refresh`, `/auth/logout`, `/auth/logout-all` | вход, сессии |
+| `POST /auth/2fa/enable`, `/confirm`, `/disable`, `/recovery-codes` | TOTP: QR-код, подтверждение, отключение по коду |
+| `GET /auth/sessions`, `DELETE /auth/sessions/{id}` | активные сессии (устройство, IP, даты) и их отзыв |
+| `POST /auth/change-password` | старый пароль обязателен; остальные сессии отзываются |
+| `POST /auth/verify-age` | фото (multipart) → BetterAgeVerify, порог `predicted_age ≥ 18` |
+| `PATCH /users/me/profile`, `POST/DELETE /users/me/avatar`, `GET /users/{id}/avatar` | никнейм и аватар |
+| `PATCH /users/me/username` | смена username раз в 6 месяцев (429), уникальность без учёта регистра (409) |
+| `GET /users`, `POST /users/{id}/reset-username`, `/block`, `/unblock` | модерация (moderator — только над клиентами) |
+| `PATCH /users/{id}` | смена роли (admin) |
+
+Роли проверяются на бэкенде зависимостью `require_role(...)`: `POST/PUT/DELETE /courses` разрешены только
+`moderator` и `admin` (клиент получает 403, даже отправив запрос в обход интерфейса). Курсы с `min_age > 0`
+отфильтрованы в SQL-запросе для пользователей без подтверждённого возраста. Сколько курсов скрыто, сообщает
+заголовок `X-Age-Restricted-Hidden`, а `GET /courses/{id}` такого курса отвечает 403 с `X-Error-Code: age_verification_required`.
+
+### Проверка возраста: BetterAgeVerify вместо self.xyz
+
+Адаптер `app/age_estimator.py`, переключатель `AGE_ESTIMATOR_BACKEND`:
+
+* `betterageverify` — локальная библиотека [BetterAgeVerify](https://github.com/BetterAgeVerify/BetterAgeVerify):
+  ансамбль WideResNet / DEX / ViT. Нужны `torch`, `torchvision`, `timm`, `facenet-pytorch`, клон репозитория
+  (`BETTERAGEVERIFY_PATH`) и веса (`BETTERAGEVERIFY_WEIGHTS_DIR`). Модели грузятся один раз и работают в отдельном потоке.
+* `mock` (по умолчанию) — демо-оценщик для разработки, CI и скриншотов: возраст из `AGE_ESTIMATOR_MOCK_AGE`,
+  ответ помечен `estimator: "mock"`.
+
+> **Ограничение, найденное при выполнении работы (ноябрь 2026).** В опубликованном репозитории BetterAgeVerify нет
+> обученных весов: `scripts/download_models.py` ссылается на `https://example.com/...`, а `src/age_estimator.py`
+> вообще не вызывает `torch.load`. Головы моделей инициализируются случайно, и «возраст» получается случайным числом.
+> Поэтому адаптер отказывается работать без файлов весов (503), а по умолчанию включён `mock`.
+
+Флаг `is_adult` у BetterAgeVerify означает ≥ 21, поэтому порог 18+ проверяется по `predicted_age`.
+Результат с `confidence < AGE_MIN_CONFIDENCE` отклоняется (422, «сделайте другое фото»).
+Фото читается только в память и нигде не сохраняется. Попыток — не больше 5 за 10 минут.
+Проверка по фото не защищает от чужих и сгенерированных фотографий; в production её стоит дополнить снимком
+с камеры устройства и ручной модерацией спорных случаев.
+
+### Какие данные мы храним
+
+| Поле (таблица `users`, если не указано) | Зачем | Как хранится | Срок |
+|---|---|---|---|
+| `username`, `display_name` | вход, отображение | открыто; username уникален без учёта регистра | пока жив аккаунт |
+| `email` | вход, письма подтверждения | открыто, уникален | пока жив аккаунт |
+| `hashed_password`, `password_changed_at` | аутентификация | bcrypt (12 раундов); пароль нигде не хранится и не логируется | пока жив аккаунт |
+| `role`, `is_active` | авторизация, блокировка | открыто; меняет только admin / moderator | пока жив аккаунт |
+| `totp_secret` | проверка кодов 2FA | **зашифрован** (Fernet, ключ `TOTP_ENCRYPTION_KEY`) | до отключения 2FA |
+| `totp_recovery_codes` | вход без телефона | только SHA-256, каждый код одноразовый | до отключения 2FA |
+| `totp_last_timestep` | защита от повторного кода | номер 30-секундного интервала | до отключения 2FA |
+| `email_verification_token` | ссылка из письма | только SHA-256 | до подтверждения (≤ 24 ч) |
+| `is_email_verified`, `email_verified_at` | активация аккаунта | открыто | пока жив аккаунт |
+| `is_age_verified`, `age_verified_at`, `minimum_age` | доступ к курсам 18+ | только результат «да/нет» и порог. **Фото, дата рождения и оценённый возраст не хранятся** | пока жив аккаунт |
+| `age_verification_required` | блокировать ли вход до проверки | флаг | пока жив аккаунт |
+| `avatar_url`, `user_avatars.content` | аватар | WebP 256×256, перекодирован сервером (EXIF и метаданные удалены) | до удаления аватара |
+| `username_changed_at` | кулдаун 6 месяцев | дата | пока жив аккаунт |
+| `refresh_tokens`: `jti`, `family_id`, `user_agent`, `ip_address`, даты | отзыв сессий, reuse detection, список устройств | jti вместо токена; UA обрезан до 200 символов | 7 дней (срок токена) |
+
+Ничего из этого `GET /auth/me` не отдаёт в виде хэшей или секретов. Ответ содержит только флаги и даты.
+Аватар отдаётся только вошедшим пользователям. Удаление пользователя каскадно удаляет его сессии и аватар.
+
+### Тесты ЛР8
+
+* бэкенд: `app/tests/test_accounts.py` (регистрация → возраст → письмо → вход, 2FA и replay, коды восстановления,
+  сессии и CSRF, RBAC, курсы 18+ и кэш, аватар (SVG, магические байты, размер), кулдаун username, модерация),
+  обновлённый `test_auth.py` (cookie, ротация, reuse detection). Всего `pytest`: **344 passed**.
+* фронтенд: четыре теста из методички (`AgeVerificationCard`, `AccountView`, `TwoFactorCard`, `VerifyEmailView`
+  с `vi.useFakeTimers()`) и тесты регистрации, входа с 2FA, сессий, профиля, модерации, сквозной `app-flow.spec.js`.
+  Всего `npm run test:run`: **253 passed**. `npm run test:live` (4 сценария) проходит против запущенного FastAPI.
+
 ## Лабораторная № 7: компонентная архитектура фронтенда и CRUD
 
 Во фронтенде появились собственные UI-компоненты (`BaseButton`, `BaseInput`, `BaseModal`, `BaseCard`, toast-уведомления),
@@ -504,13 +620,11 @@ cd frontend-app && npm install && cp .env.example .env.local && npm run dev
 
 ```bash
 kubectl port-forward svc/fastapi-service 8000:80 -n fastapi-app
-# Регистрация (создаёт студента и пользователя с ролью user)
-curl -X POST localhost:8000/auth/register -H 'Content-Type: application/json' \
-  -d '{"username":"anna_s","password":"Str0ng-passw0rd","full_name":"Смирнова Анна","email":"anna@example.com"}'
-# Вход → access + refresh
-curl -X POST localhost:8000/auth/token -d 'username=anna_s&password=Str0ng-passw0rd'
-TOKEN=<access_token>
-curl localhost:8000/auth/me -H "Authorization: Bearer $TOKEN"
+# С лаб. № 8 токены выдаются в httpOnly cookie, а вход требует подтверждённого email
+# (см. «Лабораторная № 8»). Для curl удобно хранить cookie в файле:
+curl -c jar -X POST localhost:8000/auth/token -d 'username=admin&password=ChangeMe-Admin-2026'
+curl -b jar localhost:8000/auth/me
+# изменяющие запросы с cookie требуют X-CSRF-Token = значение cookie csrf_token
 # Первый администратор создаётся из ADMIN_BOOTSTRAP_USERNAME/PASSWORD (k8s/02-secrets.yaml)
 curl -X POST localhost:8000/auth/token -d 'username=admin&password=ChangeMe-Admin-2026'
 ```

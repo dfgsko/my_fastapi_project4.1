@@ -42,6 +42,13 @@ class CourseBase(BaseModel):
         description="Длительность курса в часах",
         examples=[36],
     )
+    min_age: int = Field(
+        default=0,
+        ge=0,
+        le=21,
+        description="Возрастное ограничение: 0 — для всех, 18 — контент 18+",
+        examples=[0],
+    )
 
 
 class CourseCreate(CourseBase):
@@ -62,6 +69,7 @@ class CourseUpdate(BaseModel):
     description: str = Field(..., min_length=1, max_length=2000)
     instructor: str = Field(..., min_length=1, max_length=200)
     duration_hours: int = Field(..., gt=0, le=1000)
+    min_age: int = Field(default=0, ge=0, le=21)
 
 
 class Course(CourseBase):

@@ -36,7 +36,8 @@ async def ensure_bootstrap_admin(session_factory=None) -> bool:
                 return False
             session.add(
                 User(username=username.lower(), hashed_password=hash_password(password),
-                     role=ROLE_ADMIN)
+                     role=ROLE_ADMIN, is_email_verified=True,
+                     age_verification_required=False)
             )
             await session.commit()
             logger.info("Создан bootstrap-администратор %r", username)

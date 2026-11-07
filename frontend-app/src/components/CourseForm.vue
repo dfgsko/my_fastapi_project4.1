@@ -10,7 +10,7 @@ import BaseButton from '@/components/ui/BaseButton.vue'
 const props = defineProps({
   initialValues: {
     type: Object,
-    default: () => ({ title: '', description: '', instructor: '', duration_hours: 36 }),
+    default: () => ({ title: '', description: '', instructor: '', duration_hours: 36, min_age: 0 }),
   },
   mode: { type: String, default: 'create', validator: (v) => ['create', 'edit'].includes(v) },
   // async (payload) => void. Бросает ошибку Axios — форма её разберёт.
@@ -94,6 +94,13 @@ defineExpose({ isDirty })
       :error="errors.duration_hours"
       @blur="validateField('duration_hours')"
     />
+    <div class="base-input">
+      <label for="min_age">Возрастное ограничение</label>
+      <select id="min_age" v-model.number="values.min_age" class="select">
+        <option :value="0">Для всех</option>
+        <option :value="18">18+ (только с подтверждённым возрастом)</option>
+      </select>
+    </div>
     <p v-if="submitError" class="submit-error" role="alert">{{ submitError }}</p>
     <div class="course-form__actions">
       <BaseButton variant="secondary" :disabled="isSubmitting" @click="emit('cancel')">
@@ -109,6 +116,23 @@ defineExpose({ isDirty })
 <style scoped>
 .course-form {
   max-width: 640px;
+}
+.base-input {
+  margin-bottom: 1rem;
+}
+.base-input label {
+  display: block;
+  margin-bottom: 0.35rem;
+  font-weight: 600;
+}
+.select {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border, #cbd5e0);
+  border-radius: var(--radius-sm, 4px);
+  background: var(--color-surface, #fff);
+  color: inherit;
+  font: inherit;
 }
 .submit-error {
   color: var(--color-danger, #c53030);

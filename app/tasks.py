@@ -119,3 +119,61 @@ def generate_certificate_task(
     except Exception as exc:  # noqa: BLE001
         logger.error("Ошибка генерации сертификата enrollment_id=%s: %s", enrollment_id, exc)
         raise self.retry(exc=exc)
+
+
+# ---------------------------------------------------------------------------
+# Письмо подтверждения email (лабораторная № 8, шаг 9)
+# ---------------------------------------------------------------------------
+
+
+def build_verification_email(email: str, token: str):
+    """Собирает письмо (EmailMessage корректно кодирует кириллицу в UTF-8)."""
+    from email.message import EmailMessage
+
+    from app.config import email_token_hours, frontend_url, smtp_settings
+
+    verify_url = f"{frontend_url()}/verify-email?token={token}"
+    msg = EmailMessage()
+    msg["Subject"] = "Подтвердите email — Образовательная платформа"
+    msg["From"] = smtp_settings()["from"]
+    msg["To"] = email
+    msg.set_content(
+        "Здравствуйте!\n\n"
+        "Вы зарегистрировались на образовательной платформе. Чтобы активировать "
+        "аккаунт, перейдите по ссылке:\n\n"
+        f"{verify_url}\n\n"
+        f"Ссылка действует {email_token_hours()} ч и работает один раз.\n"
+        "Если вы не регистрировались — просто проигнорируйте это письмо.\n"
+    )
+    return msg, verify_url
+
+
+@celery_app.task(bind=True, name="tasks.send_verification_email", max_retries=3)
+def send_verification_email(self, email: str, token: str) -> dict:
+    """
+    Отправляет письмо через SMTP. Выполняется воркером в фоне: регистрация
+    сразу отвечает 201, а письмо уходит позже. При недоступности SMTP —
+    повтор с экспоненциальной задержкой 60 → 120 → 240 с.
+    """
+    import smtplib
+
+    from app.config import smtp_settings
+
+    cfg = smtp_settings()
+    msg, verify_url = build_verification_email(email, token)
+    if not cfg["host"]:
+        # Режим разработки без почтового сервера: ссылка — в лог воркера.
+        logger.warning("SMTP_HOST не задан. Ссылка подтверждения для %s: %s", email, verify_url)
+        return {"status": "logged", "email": email}
+    try:
+        with smtplib.SMTP(cfg["host"], cfg["port"], timeout=15) as smtp:
+            if cfg["starttls"]:
+                smtp.starttls()
+            if cfg["user"]:
+                smtp.login(cfg["user"], cfg["password"])
+            smtp.send_message(msg)
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Письмо для %s не отправлено: %s", email, exc)
+        raise self.retry(exc=exc, countdown=60 * (2 ** self.request.retries))
+    logger.info("Письмо подтверждения отправлено: %s", email)
+    return {"status": "sent", "email": email}

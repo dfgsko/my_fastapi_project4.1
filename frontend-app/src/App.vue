@@ -3,6 +3,7 @@
 import { RouterLink, RouterView } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import ToastContainer from '@/components/ui/ToastContainer.vue'
+import UserMenu from '@/components/UserMenu.vue'
 
 const auth = useAuthStore()
 </script>
@@ -12,14 +13,14 @@ const auth = useAuthStore()
     <RouterLink to="/" class="brand">Курсы и студенты</RouterLink>
     <nav>
       <template v-if="auth.isAuthenticated">
-        <RouterLink to="/">Главная</RouterLink>
-        <span v-if="auth.user" class="user">
-          {{ auth.user.username }}<span v-if="auth.isAdmin" class="role">admin</span>
-        </span>
-        <button type="button" @click="auth.logout()">Logout</button>
+        <RouterLink to="/">Курсы</RouterLink>
+        <!-- Пункт виден только модераторам и администраторам. -->
+        <RouterLink v-if="auth.isModerator" to="/moderation">Модерация</RouterLink>
+        <UserMenu />
       </template>
-      <template v-else>
-        <RouterLink to="/login">Login</RouterLink>
+      <template v-else-if="auth.initialized">
+        <RouterLink to="/login">Войти</RouterLink>
+        <RouterLink to="/register" class="cta">Регистрация</RouterLink>
       </template>
     </nav>
   </header>
@@ -36,7 +37,7 @@ const auth = useAuthStore()
   align-items: center;
   flex-wrap: wrap;
   gap: 0.5rem 1rem;
-  padding: 0.75rem 1rem;
+  padding: 0.6rem 1rem;
   background: var(--color-surface, #fff);
   border-bottom: 1px solid var(--color-border, #cbd5e0);
 }
@@ -51,30 +52,14 @@ nav {
   gap: 1rem;
   align-items: center;
 }
-.user {
-  color: var(--color-muted, #4a5568);
-}
-.role {
-  margin-left: 0.35rem;
-  padding: 0.05rem 0.4rem;
-  border-radius: 999px;
+.cta {
+  padding: 6px 12px;
+  border-radius: var(--radius-sm, 4px);
   background: var(--color-primary, #2b6cb0);
   color: #fff;
-  font-size: 0.75rem;
+  text-decoration: none;
 }
-nav button {
-  padding: 6px 12px;
-  border: 1px solid var(--color-border, #cbd5e0);
-  border-radius: var(--radius-sm, 4px);
-  background: var(--color-surface, #fff);
-  font: inherit;
-  cursor: pointer;
-}
-nav button:hover {
-  background: var(--color-secondary, #e2e8f0);
-}
-nav button:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring, 0 0 0 3px rgba(43, 108, 176, 0.35));
+.cta:hover {
+  background: var(--color-primary-hover, #2c5282);
 }
 </style>

@@ -163,7 +163,7 @@ async def test_admin_user_update_allows_only_role_and_active(client, user_client
 
 
 async def test_admin_cannot_lock_himself_out(client, admin):
-    resp = await client.patch(f"/users/{admin['id']}", json={"role": "user"})
+    resp = await client.patch(f"/users/{admin['id']}", json={"role": "client"})
     assert resp.status_code == 400
 
 

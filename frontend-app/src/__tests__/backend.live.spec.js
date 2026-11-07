@@ -2,17 +2,20 @@
  * «Живые» сквозные тесты против НАСТОЯЩЕГО бэкенда FastAPI (не мок):
  *
  *   uvicorn app.main:app --port 8000      # бэкенд с bootstrap-админом
- *   python scripts/seed_demo.py           # демо-курсы и пользователь student
+ *   python scripts/seed_demo.py           # демо-курсы, student (client), moder (moderator)
  *   npm run test:live
+ *
+ * Лаб. № 8: сессия живёт в httpOnly cookie — jsdom хранит их в своём cookie
+ * jar и отправляет с withCredentials, как настоящий браузер.
  *
  * jsdom работает с origin http://localhost:5173 и проверяет CORS, как браузер.
  * Без LIVE_API=1 тесты пропускаются (CI бэкенд не поднимает).
  */
 import { describe, it, expect, vi } from 'vitest'
 
-const ADMIN = [
-  process.env.LIVE_ADMIN || 'admin',
-  process.env.LIVE_ADMIN_PASSWORD || 'ChangeMe-Admin-2026',
+const MODER = [
+  process.env.LIVE_MODER || 'moder',
+  process.env.LIVE_MODER_PASSWORD || 'Moder-passw0rd-1',
 ]
 const STUDENT = [
   process.env.LIVE_USER || 'student',
@@ -37,6 +40,10 @@ async function boot(path) {
   history.pushState({}, '', '/')
   document.body.innerHTML = ''
   localStorage.clear()
+  // Новая «вкладка» без сессии. httpOnly-cookie прошлого теста из JS не
+  // стереть (в этом и смысл) — просим сервер завершить сессию.
+  const client = await import('@/api/client')
+  await client.default.post('/auth/logout').catch(() => {})
   const { mount } = await import('@vue/test-utils')
   const { createPinia } = await import('pinia')
   const { default: App } = await import('@/App.vue')
@@ -51,6 +58,8 @@ async function boot(path) {
 }
 
 async function logIn({ wrapper, router }, [user, pass]) {
+  // Первый переход ждёт GET /auth/me (восстановление сессии) — форма появится после.
+  await waitFor(() => wrapper.find('input#username').exists())
   await wrapper.find('input#username').setValue(user)
   await wrapper.find('input#password').setValue(pass)
   await wrapper.find('form').trigger('submit')
@@ -67,16 +76,17 @@ async function fillCourse(wrapper, values) {
 describe.skipIf(!process.env.LIVE_API)('живой бэкенд FastAPI', { timeout: 30000 }, () => {
   it('неверный пароль → сообщение формы', async () => {
     const app = await boot('/login')
+    await waitFor(() => app.wrapper.find('input#username').exists())
     await app.wrapper.find('input#username').setValue(STUDENT[0])
     await app.wrapper.find('input#password').setValue('Wrong-passw0rd')
     await app.wrapper.find('form').trigger('submit')
     await waitFor(() => app.wrapper.find('.error').exists())
-    expect(app.wrapper.find('.error').text()).toBe('Invalid username or password')
+    expect(app.wrapper.find('.error').text()).toBe('Неверный логин или пароль')
   })
 
   it('CRUD: создание → 422 → детали → редактирование → удаление', async () => {
-    const app = await boot('/')
-    await logIn(app, ADMIN)
+    const app = await boot('/login')
+    await logIn(app, MODER)
     await waitFor(() => app.wrapper.findAll('.course-card').length > 0)
     const title = `Live-курс ${Date.now()}`
 
@@ -124,12 +134,35 @@ describe.skipIf(!process.env.LIVE_API)('живой бэкенд FastAPI', { time
     await waitFor(() => app.wrapper.text().includes('Запись не найдена'))
   })
 
-  it('студент видит курсы, но не может их менять', async () => {
-    const app = await boot('/')
+  it('студент (client) видит курсы без 18+, не может их менять; прямой POST → 403', async () => {
+    const app = await boot('/login')
     await logIn(app, STUDENT)
     await waitFor(() => app.wrapper.findAll('.course-card').length > 0)
     expect(button(app.wrapper, 'Добавить')).toBeUndefined()
+    await waitFor(() => app.wrapper.find('.age-banner').exists())
+    expect(app.wrapper.find('.age-banner').text()).toContain('Скрыто курсов 18+')
     await app.router.push('/courses/create')
     await waitFor(() => app.router.currentRoute.value.name === 'home')
+    // Обход интерфейса: запрос напрямую, с cookie сессии и CSRF-токеном.
+    const { default: apiClient } = await import('@/api/client')
+    const err = await apiClient
+      .post('/courses', { title: 'x', description: 'y', instructor: 'z', duration_hours: 1 })
+      .catch((e) => e)
+    expect(err.response.status).toBe(403)
+    expect(err.response.data.detail).toBe('Insufficient permissions')
+  })
+
+  it('после выхода cookie очищены и /auth/me → 401', async () => {
+    const app = await boot('/login')
+    await logIn(app, STUDENT)
+    const { default: apiClient } = await import('@/api/client')
+    expect((await apiClient.get('/auth/me')).status).toBe(200)
+    expect(document.cookie).not.toContain('access_token') // httpOnly — JS её не видит
+    expect(document.cookie).toContain('csrf_token')
+    await app.wrapper.find('.user-menu .trigger').trigger('click')
+    await button(app.wrapper, 'Выйти').trigger('click')
+    await waitFor(() => app.router.currentRoute.value.name === 'login')
+    const err = await apiClient.get('/auth/me').catch((e) => e)
+    expect(err.response.status).toBe(401)
   })
 })

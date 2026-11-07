@@ -1,6 +1,6 @@
 <!-- Список курсов: useResource, поиск по преподавателю с debounce, адаптивная сетка. -->
 <script setup>
-import { onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useResource } from '@/composables/useResource'
 import { useDebouncedRef } from '@/composables/useDebounce'
@@ -11,7 +11,10 @@ import CourseCard from '@/components/CourseCard.vue'
 
 const router = useRouter()
 const auth = useAuthStore()
-const { items, isLoading, error, fetchList } = useResource('/courses')
+const { items, isLoading, error, fetchList, listHeaders } = useResource('/courses')
+
+// Сколько курсов 18+ бэкенд скрыл (сами курсы до фронтенда не доходят).
+const hiddenCount = computed(() => Number(listHeaders.value?.['x-age-restricted-hidden'] || 0))
 
 const search = ref('')
 const debouncedSearch = useDebouncedRef(search, 300)
@@ -30,7 +33,8 @@ watch(debouncedSearch, load)
   <div>
     <header class="page-header">
       <h1>Курсы</h1>
-      <BaseButton v-if="auth.isAdmin" @click="router.push({ name: 'course-create' })">
+      <!-- Кнопка только для moderator/admin; клиент её не видит (а бэкенд вернул бы 403). -->
+      <BaseButton v-if="auth.canManageContent" @click="router.push({ name: 'course-create' })">
         + Добавить
       </BaseButton>
     </header>
@@ -44,6 +48,16 @@ watch(debouncedSearch, load)
       autocomplete="off"
       class="search"
     />
+
+    <div v-if="hiddenCount > 0" class="age-banner">
+      <span>
+        Скрыто курсов 18+: <strong>{{ hiddenCount }}</strong
+        >. Для доступа подтвердите возраст.
+      </span>
+      <BaseButton size="sm" variant="secondary" @click="router.push('/verify-age')">
+        Подтвердить возраст
+      </BaseButton>
+    </div>
 
     <div v-if="isLoading && items.length === 0" class="state loading">Загрузка…</div>
     <div v-else-if="error" class="state error">
@@ -69,6 +83,19 @@ watch(debouncedSearch, load)
 }
 .search {
   max-width: 360px;
+}
+.age-banner {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin: 0 0 1rem;
+  padding: 0.75rem 1rem;
+  border-left: 4px solid #d69e2e;
+  border-radius: 6px;
+  background: #fffbea;
+  color: #744210;
 }
 /* Адаптивная сетка без медиа-запросов: столько колонок по 240px, сколько влезет. */
 .items-list {

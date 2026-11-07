@@ -140,4 +140,31 @@ describe('CourseDetailView', () => {
     expect(button('Удалить')).toBeUndefined()
     expect(button('Редактировать')).toBeUndefined()
   })
+
+  it('курс 18+ без подтверждённого возраста (403 + X-Error-Code) — заглушка, а не ошибка', async () => {
+    apiClient.get.mockRejectedValue({
+      response: {
+        status: 403,
+        data: { detail: 'Для доступа подтвердите возраст' },
+        headers: { 'x-error-code': 'age_verification_required' },
+      },
+    })
+    const { wrapper, push } = await mountDetail('client')
+    await flushPromises()
+    expect(wrapper.find('.age-lock').text()).toContain('Для доступа подтвердите возраст')
+    await wrapper.find('.age-lock button').trigger('click')
+    expect(push).toHaveBeenCalledWith('/verify-age')
+  })
+
+  it('клиент не видит «Редактировать» и «Удалить», модератор — видит', async () => {
+    apiClient.get.mockResolvedValue({ data: COURSE })
+    const client = await mountDetail('client')
+    await flushPromises()
+    expect(client.wrapper.text()).not.toContain('Удалить')
+    client.wrapper.unmount()
+    const moder = await mountDetail('moderator')
+    await flushPromises()
+    expect(moder.wrapper.text()).toContain('Удалить')
+    moder.wrapper.unmount()
+  })
 })

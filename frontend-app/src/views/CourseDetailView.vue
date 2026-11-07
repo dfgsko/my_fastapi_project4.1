@@ -14,7 +14,7 @@ const props = defineProps({ id: { type: [String, Number], required: true } })
 const router = useRouter()
 const toast = useToast()
 const auth = useAuthStore()
-const { item, isLoading, error, notFound, fetchOne, remove } = useResource('/courses')
+const { item, isLoading, error, notFound, errorCode, fetchOne, remove } = useResource('/courses')
 
 const showConfirm = ref(false)
 const isDeleting = ref(false)
@@ -42,6 +42,13 @@ async function confirmDelete() {
     <RouterLink :to="{ name: 'home' }" class="back">← Все курсы</RouterLink>
 
     <div v-if="isLoading" class="state">Загрузка…</div>
+    <!-- Курс 18+: бэкенд вернул 403 с X-Error-Code — показываем заглушку, а не ошибку. -->
+    <BaseCard v-else-if="errorCode === 'age_verification_required'" class="age-lock">
+      <div class="lock" aria-hidden="true">18+</div>
+      <h1>Для доступа подтвердите возраст</h1>
+      <p>Этот курс доступен только пользователям, подтвердившим, что им больше 18 лет.</p>
+      <BaseButton @click="router.push('/verify-age')">Подтвердить возраст</BaseButton>
+    </BaseCard>
     <div v-else-if="notFound" class="state error">
       <h1>Запись не найдена</h1>
       <p>Возможно, курс уже удалён.</p>
@@ -62,10 +69,12 @@ async function confirmDelete() {
         <dd>{{ item.instructor }}</dd>
         <dt>Длительность</dt>
         <dd>{{ item.duration_hours }} ч</dd>
+        <dt>Возраст</dt>
+        <dd>{{ item.min_age > 0 ? `${item.min_age}+` : 'Для всех' }}</dd>
         <dt>ID</dt>
         <dd>{{ item.id }}</dd>
       </dl>
-      <template v-if="auth.isAdmin" #footer>
+      <template v-if="auth.canManageContent" #footer>
         <div class="actions">
           <BaseButton @click="router.push({ name: 'course-edit', params: { id } })">
             Редактировать
@@ -135,6 +144,27 @@ dd {
   display: flex;
   flex-wrap: wrap;
   gap: 0.75rem;
+}
+.age-lock {
+  max-width: 480px;
+  margin: 1rem auto;
+  text-align: center;
+}
+.age-lock h1 {
+  font-size: 1.4rem;
+}
+.lock {
+  width: 72px;
+  height: 72px;
+  margin: 0 auto 1rem;
+  border-radius: 50%;
+  background: var(--color-danger, #c53030);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.4rem;
+  font-weight: 800;
 }
 .state {
   padding: 2rem 1rem;

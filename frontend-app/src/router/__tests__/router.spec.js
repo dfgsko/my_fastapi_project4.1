@@ -5,54 +5,71 @@ import router from '@/router'
 import { useAuthStore } from '@/stores/auth'
 import apiClient from '@/api/client'
 
-// Guard запрашивает /auth/me, если роль ещё неизвестна.
+// Guard при первом переходе вызывает auth.init() → GET /auth/me.
 vi.mock('@/api/client')
 
 // Роутер — синглтон: guard берёт Pinia из ПЕРВОГО приложения, в котором он
 // установлен. Поэтому приложение и Pinia создаём один раз, а между тестами
-// только сбрасываем токен и уходим на нейтральную страницу.
+// только меняем пользователя и уходим на нейтральную страницу.
 const app = createApp({ render: () => null })
 const pinia = createPinia()
 app.use(pinia)
 app.use(router)
 const auth = useAuthStore(pinia)
 
+const client = { username: 'u', role: 'client' }
+const moderator = { username: 'm', role: 'moderator' }
+
 beforeEach(async () => {
-  apiClient.get.mockResolvedValue({ data: { username: 'u', role: 'user' } })
-  localStorage.clear()
-  auth.token = null
+  apiClient.get.mockRejectedValue({ response: { status: 401 } }) // гость
   auth.user = null
   await router.replace('/definitely-missing') // 404, публичная
   await router.isReady()
 })
 
-describe('router guard', () => {
-  it('описывает маршруты: / защищён, /login публичный', () => {
-    expect(router.resolve('/').meta.requiresAuth).toBe(true)
-    expect(router.resolve('/login').meta.requiresAuth).toBeFalsy()
-    expect(router.resolve('/login').name).toBe('login')
-  })
-
-  it('неавторизованного отправляет с / на /login', async () => {
-    await router.push('/')
-    expect(router.currentRoute.value.name).toBe('login')
-  })
-
-  it('авторизованного пускает на /', async () => {
-    auth.token = 'jwt'
+describe('router guard (лаб. № 8)', () => {
+  it('«/» публичный: гость видит лендинг, а не /login', async () => {
+    expect(router.resolve('/').meta.requiresAuth).toBeFalsy()
     await router.push('/')
     expect(router.currentRoute.value.name).toBe('home')
   })
 
-  it('авторизованного со страницы /login возвращает на главную', async () => {
-    auth.token = 'jwt'
+  it('/register, /verify-email, /check-email, /verify-age доступны гостю', async () => {
+    for (const [path, name] of [
+      ['/register', 'register'],
+      ['/verify-email?token=x', 'verify-email'],
+      ['/check-email', 'check-email'],
+      ['/verify-age?registration=true', 'verify-age'],
+    ]) {
+      await router.push(path)
+      expect(router.currentRoute.value.name).toBe(name)
+    }
+  })
+
+  it('/account требует входа', async () => {
+    await router.push('/account')
+    expect(router.currentRoute.value.name).toBe('login')
+    expect(router.currentRoute.value.query.redirect).toBe('/account')
+    auth.user = client
+    await router.push('/account')
+    expect(router.currentRoute.value.name).toBe('account')
+  })
+
+  it('вошедшего со страниц /login и /register возвращает на главную', async () => {
+    auth.user = client
     await router.push('/login')
+    expect(router.currentRoute.value.name).toBe('home')
+    await router.push('/register')
     expect(router.currentRoute.value.name).toBe('home')
   })
 
-  it('неавторизованный может открыть /login', async () => {
-    await router.push('/login')
-    expect(router.currentRoute.value.name).toBe('login')
+  it('/moderation — только moderator/admin', async () => {
+    auth.user = client
+    await router.push('/moderation')
+    expect(router.currentRoute.value.name).toBe('home')
+    auth.user = moderator
+    await router.push('/moderation')
+    expect(router.currentRoute.value.name).toBe('moderation')
   })
 
   it('неизвестный адрес открывает страницу 404', async () => {
@@ -60,19 +77,17 @@ describe('router guard', () => {
     expect(router.currentRoute.value.name).toBe('not-found')
   })
 
-  it('после выхода (токен сброшен) защита снова срабатывает', async () => {
-    auth.token = 'jwt'
-    await router.push('/')
-    expect(router.currentRoute.value.name).toBe('home')
-
-    auth.token = null
-    await router.push('/login')
-    await router.push('/')
+  it('после выхода защита снова срабатывает', async () => {
+    auth.user = client
+    await router.push('/courses/1')
+    expect(router.currentRoute.value.name).toBe('course-detail')
+    auth.user = null
+    await router.push('/courses/2')
     expect(router.currentRoute.value.name).toBe('login')
   })
 })
 
-describe('маршруты CRUD (лаб. № 7)', () => {
+describe('маршруты CRUD', () => {
   it('/courses/create не воспринимается как /courses/:id', () => {
     expect(router.resolve('/courses/create').name).toBe('course-create')
     expect(router.resolve('/courses/12').name).toBe('course-detail')
@@ -81,13 +96,13 @@ describe('маршруты CRUD (лаб. № 7)', () => {
     expect(router.resolve('/courses/abc').name).toBe('not-found') // id только из цифр
   })
 
-  it('все страницы курсов защищены requiresAuth, create/edit — ещё и requiresAdmin', () => {
+  it('страницы курсов требуют входа, create/edit — ещё и роли модератора', () => {
     for (const path of ['/courses/create', '/courses/1', '/courses/1/edit']) {
       expect(router.resolve(path).meta.requiresAuth).toBe(true)
     }
-    expect(router.resolve('/courses/create').meta.requiresAdmin).toBe(true)
-    expect(router.resolve('/courses/1/edit').meta.requiresAdmin).toBe(true)
-    expect(router.resolve('/courses/1').meta.requiresAdmin).toBeFalsy()
+    expect(router.resolve('/courses/create').meta.requiresModerator).toBe(true)
+    expect(router.resolve('/courses/1/edit').meta.requiresModerator).toBe(true)
+    expect(router.resolve('/courses/1').meta.requiresModerator).toBeFalsy()
   })
 
   it('гость на /courses/create попадает на /login с redirect', async () => {
@@ -96,18 +111,16 @@ describe('маршруты CRUD (лаб. № 7)', () => {
     expect(router.currentRoute.value.query.redirect).toBe('/courses/create')
   })
 
-  it('обычный пользователь не попадает на создание и редактирование', async () => {
-    auth.token = 'jwt'
-    auth.user = { username: 'u', role: 'user' }
+  it('клиент не попадает на создание и редактирование', async () => {
+    auth.user = client
     await router.push('/courses/create')
     expect(router.currentRoute.value.name).toBe('home')
     await router.push('/courses/3')
     expect(router.currentRoute.value.name).toBe('course-detail')
   })
 
-  it('администратор открывает создание', async () => {
-    auth.token = 'jwt'
-    auth.user = { username: 'a', role: 'admin' }
+  it('модератор открывает создание', async () => {
+    auth.user = moderator
     await router.push('/courses/create')
     expect(router.currentRoute.value.name).toBe('course-create')
   })

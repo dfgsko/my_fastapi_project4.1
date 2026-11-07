@@ -1,5 +1,7 @@
 fastapi
 uvicorn[standard]
+# [asyncio] обязательно: новые версии SQLAlchemy не ставят greenlet сами,
+# а без него create_async_engine падает с ImportError.
 sqlalchemy[asyncio]>=2.0
 asyncpg
 alembic
@@ -12,3 +14,7 @@ boto3
 python-multipart
 PyJWT
 bcrypt
+pyotp
+qrcode[pil]
+cryptography
+pillow

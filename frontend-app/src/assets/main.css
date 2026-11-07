@@ -31,6 +31,25 @@
   color: var(--color-text);
   background: var(--color-background);
 }
+/* Тёмная тема (лаб. № 8, «Настройки» аккаунта): те же токены, другие значения.
+   data-theme ставит useTheme(); «Системная» следует prefers-color-scheme. */
+:root[data-theme='dark'] {
+  --color-primary: #63a4e8;
+  --color-primary-hover: #8bbcf0;
+  --color-secondary: #2d3748;
+  --color-secondary-hover: #4a5568;
+  --color-danger: #fc8181;
+  --color-danger-hover: #feb2b2;
+  --color-success: #68d391;
+  --color-info: #63a4e8;
+  --color-text: #e2e8f0;
+  --color-muted: #a0aec0;
+  --color-border: #4a5568;
+  --color-surface: #1f2533;
+  --color-background: #151a24;
+  --focus-ring: 0 0 0 3px rgba(99, 164, 232, 0.45);
+  color-scheme: dark;
+}
 body {
   margin: 0;
 }

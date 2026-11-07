@@ -127,4 +127,30 @@ describe('HomeView', () => {
     expect(wrapper.find('.items-list img').exists()).toBe(false)
     expect(wrapper.find('.course-card h3').text()).toBe('<img src=x onerror=alert(1)>')
   })
+
+  it('«+ Добавить» видит модератор (лаб. № 8), клиент — нет', async () => {
+    apiClient.get.mockResolvedValue({ data: COURSES })
+    await mountHome({ role: 'moderator' })
+    expect(wrapper.text()).toContain('Добавить')
+    wrapper.unmount()
+    await mountHome({ role: 'client' })
+    expect(wrapper.text()).not.toContain('Добавить')
+  })
+
+  it('плашка «Скрыто курсов 18+» по заголовку X-Age-Restricted-Hidden', async () => {
+    apiClient.get.mockResolvedValue({
+      data: COURSES,
+      headers: { 'x-age-restricted-hidden': '2' },
+    })
+    const { push } = await mountHome({ role: 'client' })
+    expect(wrapper.find('.age-banner').text()).toContain('Скрыто курсов 18+: 2')
+    await wrapper.find('.age-banner button').trigger('click')
+    expect(push).toHaveBeenCalledWith('/verify-age')
+  })
+
+  it('без скрытых курсов плашки нет', async () => {
+    apiClient.get.mockResolvedValue({ data: COURSES, headers: { 'x-age-restricted-hidden': '0' } })
+    await mountHome({ role: 'client' })
+    expect(wrapper.find('.age-banner').exists()).toBe(false)
+  })
 })

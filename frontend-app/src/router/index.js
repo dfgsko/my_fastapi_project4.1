@@ -1,18 +1,64 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
-import HomeView from '@/views/HomeView.vue'
+import RootView from '@/views/RootView.vue'
 
 // Маршруты экспортируются: тесты создают с ними роутер в памяти.
+//
+// meta:
+//   requiresAuth      — только для вошедших (иначе /login?redirect=…);
+//   requiresModerator — только moderator/admin (UX; настоящая проверка — 403 бэкенда);
+//   guestOnly         — вошедшего пользователя отправляем на главную.
 export const routes = [
-  { path: '/', name: 'home', component: HomeView, meta: { requiresAuth: true } },
-  { path: '/login', name: 'login', component: () => import('@/views/LoginView.vue') },
+  // Лаб. № 8: «/» публичный — гость видит лендинг, вошедший — список курсов.
+  { path: '/', name: 'home', component: RootView },
+  {
+    path: '/login',
+    name: 'login',
+    component: () => import('@/views/LoginView.vue'),
+    meta: { guestOnly: true },
+  },
+  {
+    path: '/register',
+    name: 'register',
+    component: () => import('@/views/RegisterView.vue'),
+    meta: { guestOnly: true },
+  },
+  {
+    path: '/check-email',
+    name: 'check-email',
+    component: () => import('@/views/CheckEmailView.vue'),
+  },
+  {
+    // Без requiresAuth: у пользователя ещё нет сессии, но есть токен из письма.
+    path: '/verify-email',
+    name: 'verify-email',
+    component: () => import('@/views/VerifyEmailView.vue'),
+  },
+  {
+    // Доступен и при регистрации (cookie registration_token), и из настроек.
+    path: '/verify-age',
+    name: 'verify-age',
+    component: () => import('@/views/AgeVerificationView.vue'),
+  },
+  {
+    path: '/account',
+    name: 'account',
+    component: () => import('@/views/AccountView.vue'),
+    meta: { requiresAuth: true },
+  },
+  {
+    path: '/moderation',
+    name: 'moderation',
+    component: () => import('@/views/ModerationView.vue'),
+    meta: { requiresAuth: true, requiresModerator: true },
+  },
   // Порядок важен: статический /courses/create — раньше динамического /courses/:id.
   // Дополнительно :id ограничен цифрами — «create» не совпадёт с ним в любом порядке.
   {
     path: '/courses/create',
     name: 'course-create',
     component: () => import('@/views/CourseCreateView.vue'),
-    meta: { requiresAuth: true, requiresAdmin: true },
+    meta: { requiresAuth: true, requiresModerator: true },
   },
   {
     path: '/courses/:id(\\d+)',
@@ -26,7 +72,7 @@ export const routes = [
     name: 'course-edit',
     component: () => import('@/views/CourseEditView.vue'),
     props: true,
-    meta: { requiresAuth: true, requiresAdmin: true },
+    meta: { requiresAuth: true, requiresModerator: true },
   },
   {
     path: '/:pathMatch(.*)*',
@@ -44,17 +90,16 @@ const router = createRouter({
 // функции: на верхнем уровне модуля Pinia ещё не подключена (app.use(pinia)).
 router.beforeEach(async (to) => {
   const auth = useAuthStore()
+  // Первый переход ждёт GET /auth/me: только так можно узнать, есть ли
+  // сессия (cookie httpOnly — из JS её не видно).
+  await auth.init()
   if (to.meta.requiresAuth && !auth.isAuthenticated) {
     return { name: 'login', query: to.fullPath !== '/' ? { redirect: to.fullPath } : undefined }
   }
-  if (to.name === 'login' && auth.isAuthenticated) {
+  if (to.meta.guestOnly && auth.isAuthenticated) {
     return { name: 'home' }
   }
-  // Роль нужна, чтобы показать или скрыть кнопки; после перезагрузки её ещё нет.
-  if (auth.isAuthenticated && !auth.user) await auth.fetchMe()
-  // Страницы создания и редактирования — только для администратора. Это удобство
-  // интерфейса: настоящую проверку прав выполняет бэкенд (403).
-  if (to.meta.requiresAdmin && auth.user && !auth.isAdmin) {
+  if (to.meta.requiresModerator && !auth.canManageContent) {
     return { name: 'home' }
   }
 })

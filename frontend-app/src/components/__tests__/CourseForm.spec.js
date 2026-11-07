@@ -28,7 +28,7 @@ describe('CourseForm', () => {
     await wrapper.find('form').trigger('submit')
     await flushPromises()
 
-    expect(onSubmit).toHaveBeenCalledWith(VALID)
+    expect(onSubmit).toHaveBeenCalledWith({ ...VALID, min_age: 0 })
     expect(typeof onSubmit.mock.calls[0][0].duration_hours).toBe('number') // v-model.number
     expect(wrapper.emitted('saved')).toEqual([[{ id: 1 }]])
   })
@@ -129,7 +129,7 @@ describe('CourseForm', () => {
     await wrapper.find('form').trigger('submit')
     await flushPromises()
     expect(onSubmit.mock.calls[0][0]).not.toHaveProperty('id')
-    expect(onSubmit.mock.calls[0][0]).toEqual(VALID)
+    expect(onSubmit.mock.calls[0][0]).toEqual({ ...VALID, min_age: 0 })
   })
 
   it('не мутирует initialValues родителя', async () => {
@@ -152,5 +152,16 @@ describe('CourseForm', () => {
       .find((b) => b.text() === 'Отмена')
       .trigger('click')
     expect(wrapper.emitted('cancel')).toHaveLength(1)
+  })
+})
+
+describe('CourseForm: возрастное ограничение (лаб. № 8)', () => {
+  it('по умолчанию «Для всех», можно выбрать 18+', async () => {
+    const { wrapper, onSubmit } = mountForm()
+    await fill(wrapper, VALID)
+    await wrapper.find('#min_age').setValue('18')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+    expect(onSubmit).toHaveBeenCalledWith({ ...VALID, min_age: 18 })
   })
 })

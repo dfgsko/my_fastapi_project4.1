@@ -74,6 +74,9 @@ async def enroll_student(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Курс с id={payload.course_id} не найден",
         )
+    # Курс 18+: записаться напрямую через API без проверки возраста нельзя.
+    if course.min_age > 0 and not (current_user.is_age_verified or current_user.is_moderator):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Для записи подтвердите возраст")
 
     existing = await session.execute(
         select(EnrollmentORM).where(

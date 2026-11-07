@@ -61,7 +61,9 @@ async def test_login_from_vite_origin(anon_client, make_user):
     )
     assert resp.status_code == 200
     assert resp.headers["access-control-allow-origin"] == ORIGIN
-    assert resp.json()["access_token"]
+    # Лаб. № 8: сессия в cookie → CORS должен разрешать credentials.
+    assert resp.headers["access-control-allow-credentials"] == "true"
+    assert "access_token=" in resp.headers.get("set-cookie", "")
 
 
 async def test_courses_list_has_fields_used_by_frontend(client):
